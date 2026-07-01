@@ -25,6 +25,12 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
     recent_opponent_classes: dict[str, deque[float]] = defaultdict(
         lambda: deque(maxlen=FORM_WINDOW)
     )
+    recent_weighted_wins: dict[str, deque[float]] = defaultdict(
+        lambda: deque(maxlen=FORM_WINDOW)
+    )
+    recent_strength_of_schedule: dict[str, deque[float]] = defaultdict(
+        lambda: deque(maxlen=FORM_WINDOW)
+    )
     recent_dates: dict[str, pd.Timestamp | None] = defaultdict(lambda: None)
 
     home_recent_games: list[int] = []
@@ -33,6 +39,10 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
     away_recent_win_rate: list[float] = []
     home_recent_opp_class_avg: list[float] = []
     away_recent_opp_class_avg: list[float] = []
+    home_recent_weighted_win_score: list[float] = []
+    away_recent_weighted_win_score: list[float] = []
+    home_recent_schedule_strength: list[float] = []
+    away_recent_schedule_strength: list[float] = []
     home_days_since_last: list[float] = []
     away_days_since_last: list[float] = []
 
@@ -40,6 +50,8 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
         match_date = row.match_date
         home_team = row.home_team
         away_team = row.away_team
+        home_opponent_class = float(row.team2_class) if pd.notna(row.team2_class) else 0.0
+        away_opponent_class = float(row.team1_class) if pd.notna(row.team1_class) else 0.0
 
         home_recent_games.append(len(recent_wins[home_team]))
         away_recent_games.append(len(recent_wins[away_team]))
@@ -47,20 +59,26 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
         away_recent_win_rate.append(_average(recent_wins[away_team]))
         home_recent_opp_class_avg.append(_average(recent_opponent_classes[home_team]))
         away_recent_opp_class_avg.append(_average(recent_opponent_classes[away_team]))
+        home_recent_weighted_win_score.append(_average(recent_weighted_wins[home_team]))
+        away_recent_weighted_win_score.append(_average(recent_weighted_wins[away_team]))
+        home_recent_schedule_strength.append(_average(recent_strength_of_schedule[home_team]))
+        away_recent_schedule_strength.append(_average(recent_strength_of_schedule[away_team]))
         home_days_since_last.append(_days_since(recent_dates[home_team], match_date))
         away_days_since_last.append(_days_since(recent_dates[away_team], match_date))
 
         home_win = 1 if row.winner == 1 else 0
         away_win = 1 if row.winner == 2 else 0
+        home_weighted_win = home_win * (1.0 + home_opponent_class)
+        away_weighted_win = away_win * (1.0 + away_opponent_class)
 
         recent_wins[home_team].append(home_win)
         recent_wins[away_team].append(away_win)
-        recent_opponent_classes[home_team].append(
-            float(row.team2_class) if pd.notna(row.team2_class) else 0.0
-        )
-        recent_opponent_classes[away_team].append(
-            float(row.team1_class) if pd.notna(row.team1_class) else 0.0
-        )
+        recent_opponent_classes[home_team].append(home_opponent_class)
+        recent_opponent_classes[away_team].append(away_opponent_class)
+        recent_weighted_wins[home_team].append(home_weighted_win)
+        recent_weighted_wins[away_team].append(away_weighted_win)
+        recent_strength_of_schedule[home_team].append(home_opponent_class)
+        recent_strength_of_schedule[away_team].append(away_opponent_class)
         recent_dates[home_team] = match_date
         recent_dates[away_team] = match_date
 
@@ -73,6 +91,16 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
     df["away_recent_opp_class_avg"] = away_recent_opp_class_avg
     df["recent_opp_class_gap"] = (
         df["home_recent_opp_class_avg"] - df["away_recent_opp_class_avg"]
+    )
+    df["home_recent_weighted_win_score"] = home_recent_weighted_win_score
+    df["away_recent_weighted_win_score"] = away_recent_weighted_win_score
+    df["recent_weighted_win_score_gap"] = (
+        df["home_recent_weighted_win_score"] - df["away_recent_weighted_win_score"]
+    )
+    df["home_recent_schedule_strength"] = home_recent_schedule_strength
+    df["away_recent_schedule_strength"] = away_recent_schedule_strength
+    df["recent_schedule_strength_gap"] = (
+        df["home_recent_schedule_strength"] - df["away_recent_schedule_strength"]
     )
     df["home_days_since_last"] = home_days_since_last
     df["away_days_since_last"] = away_days_since_last
@@ -125,6 +153,12 @@ def build_features(matches: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
         "home_recent_opp_class_avg",
         "away_recent_opp_class_avg",
         "recent_opp_class_gap",
+        "home_recent_weighted_win_score",
+        "away_recent_weighted_win_score",
+        "recent_weighted_win_score_gap",
+        "home_recent_schedule_strength",
+        "away_recent_schedule_strength",
+        "recent_schedule_strength_gap",
         "home_days_since_last",
         "away_days_since_last",
         "rest_days_gap",
