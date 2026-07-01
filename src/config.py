@@ -16,7 +16,12 @@ class Settings:
     model_path: str = os.getenv("MODEL_PATH", "models/match_model.joblib")
     data_export_path: str = os.getenv("DATA_EXPORT_PATH", "data/raw/matches.csv")
     prediction_threshold: float = float(os.getenv("PREDICTION_THRESHOLD", "0.62"))
+    send_telegram_signals: bool = os.getenv("SEND_TELEGRAM_SIGNALS", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 
 settings = Settings()
-

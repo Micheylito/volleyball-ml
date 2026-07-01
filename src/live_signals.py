@@ -48,6 +48,7 @@ def main() -> None:
     live_feature_frame = feature_frame.tail(len(live_matches)).reset_index(drop=True)
 
     sent_count = 0
+    candidate_count = 0
     for row_index, match in live_matches.reset_index(drop=True).iterrows():
         live_features = live_feature_frame.iloc[row_index]
         probability = predict_match(live_features.to_dict())
@@ -58,10 +59,15 @@ def main() -> None:
             f"probability={probability:.4f}"
         )
         if probability >= settings.prediction_threshold:
-            send_telegram_message(format_live_message(enriched_match, probability))
-            sent_count += 1
+            candidate_count += 1
+            if settings.send_telegram_signals:
+                send_telegram_message(format_live_message(enriched_match, probability))
+                sent_count += 1
 
     print(f"Processed live matches: {len(live_matches)}")
+    print(f"Candidates above threshold: {candidate_count}")
+    if not settings.send_telegram_signals:
+        print("Telegram sending is disabled (SEND_TELEGRAM_SIGNALS=false).")
     print(f"Signals sent: {sent_count}")
 
 
