@@ -173,6 +173,100 @@ WHERE m.status = 'FINISHED'
   AND COALESCE(ms2.pct, ms2.percent / 100.0) IS NOT NULL
 """
 
+LIVE_MATCHES_QUERY = """
+WITH opening_odds AS (
+    SELECT mo.*
+    FROM match_opening_odds mo
+    INNER JOIN (
+        SELECT match_id, MIN(ts) AS first_ts
+        FROM match_opening_odds
+        GROUP BY match_id
+    ) first_odds
+        ON mo.match_id = first_odds.match_id
+       AND mo.ts = first_odds.first_ts
+),
+first_seen_odds AS (
+    SELECT fo.*
+    FROM match_first_seen_odds fo
+    INNER JOIN (
+        SELECT match_id, MIN(ts) AS first_ts
+        FROM match_first_seen_odds
+        GROUP BY match_id
+    ) first_seen
+        ON fo.match_id = first_seen.match_id
+       AND fo.ts = first_seen.first_ts
+),
+live_serve AS (
+    SELECT
+        match_id,
+        team,
+        SUM(serves) AS serves,
+        SUM(serve_wins) AS serve_wins,
+        CASE
+            WHEN SUM(serves) > 0 THEN CAST(SUM(serve_wins) AS REAL) / SUM(serves)
+            ELSE NULL
+        END AS pct
+    FROM match_serve_set_stats
+    GROUP BY match_id, team
+)
+SELECT
+    m.id AS match_id,
+    m.created_at AS match_date,
+    m.tournament AS league,
+    m.country,
+    m.gender,
+    m.age_group,
+    m.best_of,
+    m.team1 AS home_team,
+    m.team2 AS away_team,
+    m.status,
+    CAST(NULL AS INTEGER) AS winner,
+    m.team1_class,
+    m.team2_class,
+    m.match_class,
+    COALESCE(o.match_win1, f.match_win1) AS home_odds,
+    COALESCE(o.match_win2, f.match_win2) AS away_odds,
+    COALESCE(o.match_total_line, f.match_total_line) AS match_total_line,
+    COALESCE(o.match_total_over, f.match_total_over) AS match_total_over,
+    COALESCE(o.match_total_under, f.match_total_under) AS match_total_under,
+    COALESCE(o.set1_win1, f.set1_win1) AS set1_win1,
+    COALESCE(o.set1_win2, f.set1_win2) AS set1_win2,
+    COALESCE(o.set1_total_line, f.set1_total_line) AS set1_total_line,
+    COALESCE(o.set1_total_over, f.set1_total_over) AS set1_total_over,
+    COALESCE(o.set1_total_under, f.set1_total_under) AS set1_total_under,
+    CAST(NULL AS REAL) AS home_match_serves,
+    CAST(NULL AS REAL) AS home_match_serve_success,
+    CAST(NULL AS REAL) AS home_match_serve_pct,
+    CAST(NULL AS REAL) AS away_match_serves,
+    CAST(NULL AS REAL) AS away_match_serve_success,
+    CAST(NULL AS REAL) AS away_match_serve_pct,
+    ls1.pct AS live_home_serve_pct,
+    ls2.pct AS live_away_serve_pct,
+    ls1.serves AS live_home_serve_volume,
+    ls2.serves AS live_away_serve_volume,
+    CASE
+        WHEN o.match_win1 IS NOT NULL AND o.match_win2 IS NOT NULL THEN 'opening'
+        WHEN f.match_win1 IS NOT NULL AND f.match_win2 IS NOT NULL THEN 'first_seen'
+        ELSE 'missing'
+    END AS odds_source
+FROM matches m
+LEFT JOIN opening_odds o
+    ON o.match_id = m.id
+LEFT JOIN first_seen_odds f
+    ON f.match_id = m.id
+LEFT JOIN live_serve ls1
+    ON ls1.match_id = m.id
+   AND ls1.team = 1
+LEFT JOIN live_serve ls2
+    ON ls2.match_id = m.id
+   AND ls2.team = 2
+WHERE m.status != 'FINISHED'
+  AND COALESCE(m.abandoned, 0) = 0
+  AND COALESCE(o.match_win1, f.match_win1) IS NOT NULL
+  AND COALESCE(o.match_win2, f.match_win2) IS NOT NULL
+ORDER BY m.created_at ASC
+"""
+
 
 def load_matches(query: str = DEFAULT_QUERY) -> pd.DataFrame:
     if not settings.db_url:
@@ -191,6 +285,15 @@ def load_matches(query: str = DEFAULT_QUERY) -> pd.DataFrame:
 def load_dataset_diagnostics(query: str = DATASET_DIAGNOSTICS_QUERY) -> pd.DataFrame:
     if not settings.db_url:
         raise ValueError("DB_URL is empty. Fill .env before loading diagnostics.")
+
+    engine = create_engine(settings.db_url)
+    with engine.connect() as connection:
+        return pd.read_sql(text(query), connection)
+
+
+def load_live_matches(query: str = LIVE_MATCHES_QUERY) -> pd.DataFrame:
+    if not settings.db_url:
+        raise ValueError("DB_URL is empty. Fill .env before loading live matches.")
 
     engine = create_engine(settings.db_url)
     with engine.connect() as connection:

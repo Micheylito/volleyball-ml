@@ -6,6 +6,39 @@ import pandas as pd
 
 
 FORM_WINDOWS = (3, 5, 10)
+BASE_FEATURE_COLUMNS = [
+    "home_odds",
+    "away_odds",
+    "odds_gap",
+    "implied_home_prob",
+    "implied_away_prob",
+    "team1_class",
+    "team2_class",
+    "class_gap",
+    "match_class",
+    "best_of",
+    "match_total_line",
+    "match_total_over",
+    "match_total_under",
+    "set1_win1",
+    "set1_win2",
+    "set1_total_line",
+    "set1_total_over",
+    "set1_total_under",
+    "is_women",
+    "is_best_of_five",
+    "home_days_since_last",
+    "away_days_since_last",
+    "rest_days_gap",
+    "odds_source_opening",
+    "odds_source_first_seen",
+    "live_home_serve_pct",
+    "live_away_serve_pct",
+    "live_serve_pct_gap",
+    "live_home_serve_volume",
+    "live_away_serve_volume",
+    "live_serve_volume_gap",
+]
 
 
 def _average(values: deque[float]) -> float:
@@ -122,19 +155,22 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
         home_weighted_win = home_win * (1.0 + home_opponent_class)
         away_weighted_win = away_win * (1.0 + away_opponent_class)
 
-        for window in FORM_WINDOWS:
-            recent_wins[window][home_team].append(home_win)
-            recent_wins[window][away_team].append(away_win)
-            recent_opponent_classes[window][home_team].append(home_opponent_class)
-            recent_opponent_classes[window][away_team].append(away_opponent_class)
-            recent_weighted_wins[window][home_team].append(home_weighted_win)
-            recent_weighted_wins[window][away_team].append(away_weighted_win)
-            recent_strength_of_schedule[window][home_team].append(home_opponent_class)
-            recent_strength_of_schedule[window][away_team].append(away_opponent_class)
-            recent_serve_pct[window][home_team].append(home_match_serve_pct)
-            recent_serve_pct[window][away_team].append(away_match_serve_pct)
-            recent_serve_volume[window][home_team].append(home_match_serves)
-            recent_serve_volume[window][away_team].append(away_match_serves)
+        # Update history only from resolved matches to avoid leaking live match state
+        # into later rows in the same feature build.
+        if row.winner in (1, 2):
+            for window in FORM_WINDOWS:
+                recent_wins[window][home_team].append(home_win)
+                recent_wins[window][away_team].append(away_win)
+                recent_opponent_classes[window][home_team].append(home_opponent_class)
+                recent_opponent_classes[window][away_team].append(away_opponent_class)
+                recent_weighted_wins[window][home_team].append(home_weighted_win)
+                recent_weighted_wins[window][away_team].append(away_weighted_win)
+                recent_strength_of_schedule[window][home_team].append(home_opponent_class)
+                recent_strength_of_schedule[window][away_team].append(away_opponent_class)
+                recent_serve_pct[window][home_team].append(home_match_serve_pct)
+                recent_serve_pct[window][away_team].append(away_match_serve_pct)
+                recent_serve_volume[window][home_team].append(home_match_serves)
+                recent_serve_volume[window][away_team].append(away_match_serves)
         recent_dates[home_team] = match_date
         recent_dates[away_team] = match_date
 
@@ -171,51 +207,10 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def build_features(matches: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
-    df = matches.copy()
-    df["match_date"] = pd.to_datetime(df["match_date"])
-    df = df.sort_values("match_date").reset_index(drop=True)
-    df = add_form_features(df)
-
-    df["target_home_win"] = (df["winner"] == 1).astype(int)
-    df["odds_gap"] = df["away_odds"] - df["home_odds"]
-    df["implied_home_prob"] = 1.0 / df["home_odds"]
-    df["implied_away_prob"] = 1.0 / df["away_odds"]
-    df["class_gap"] = df["team1_class"] - df["team2_class"]
-    df["is_women"] = (df["gender"] == "W").astype(int)
-    df["is_best_of_five"] = (df["best_of"] == 5).astype(int)
-    df["odds_source_opening"] = (df["odds_source"] == "opening").astype(int)
-    df["odds_source_first_seen"] = (df["odds_source"] == "first_seen").astype(int)
-
-    numeric_columns = [
-        "home_odds",
-        "away_odds",
-        "odds_gap",
-        "implied_home_prob",
-        "implied_away_prob",
-        "team1_class",
-        "team2_class",
-        "class_gap",
-        "match_class",
-        "best_of",
-        "match_total_line",
-        "match_total_over",
-        "match_total_under",
-        "set1_win1",
-        "set1_win2",
-        "set1_total_line",
-        "set1_total_over",
-        "set1_total_under",
-        "is_women",
-        "is_best_of_five",
-        "home_days_since_last",
-        "away_days_since_last",
-        "rest_days_gap",
-        "odds_source_opening",
-        "odds_source_first_seen",
-    ]
+def get_feature_columns() -> list[str]:
+    feature_columns = BASE_FEATURE_COLUMNS.copy()
     for window in FORM_WINDOWS:
-        numeric_columns.extend(
+        feature_columns.extend(
             [
                 f"home_recent_games_{window}",
                 f"away_recent_games_{window}",
@@ -239,7 +234,50 @@ def build_features(matches: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
                 f"recent_serve_volume_gap_{window}",
             ]
         )
+    return feature_columns
+
+
+def prepare_feature_frame(matches: pd.DataFrame) -> pd.DataFrame:
+    df = matches.copy()
+    df["match_date"] = pd.to_datetime(df["match_date"])
+    df = df.sort_values("match_date").reset_index(drop=True)
+    df = add_form_features(df)
+
+    df["winner"] = pd.to_numeric(df["winner"], errors="coerce")
+    df["odds_gap"] = df["away_odds"] - df["home_odds"]
+    df["implied_home_prob"] = 1.0 / df["home_odds"]
+    df["implied_away_prob"] = 1.0 / df["away_odds"]
+    df["class_gap"] = df["team1_class"] - df["team2_class"]
+    df["is_women"] = (df["gender"] == "W").astype(int)
+    df["is_best_of_five"] = (df["best_of"] == 5).astype(int)
+    df["odds_source_opening"] = (df["odds_source"] == "opening").astype(int)
+    df["odds_source_first_seen"] = (df["odds_source"] == "first_seen").astype(int)
+    df["live_home_serve_pct"] = pd.to_numeric(df.get("live_home_serve_pct", 0.0), errors="coerce")
+    df["live_away_serve_pct"] = pd.to_numeric(df.get("live_away_serve_pct", 0.0), errors="coerce")
+    df["live_serve_pct_gap"] = df["live_home_serve_pct"] - df["live_away_serve_pct"]
+    df["live_home_serve_volume"] = pd.to_numeric(
+        df.get("live_home_serve_volume", 0.0), errors="coerce"
+    )
+    df["live_away_serve_volume"] = pd.to_numeric(
+        df.get("live_away_serve_volume", 0.0), errors="coerce"
+    )
+    df["live_serve_volume_gap"] = (
+        df["live_home_serve_volume"] - df["live_away_serve_volume"]
+    )
+
+    numeric_columns = get_feature_columns()
     df[numeric_columns] = df[numeric_columns].apply(pd.to_numeric, errors="coerce")
-    x = df[numeric_columns].fillna(0.0)
+    return df
+
+
+def build_features(matches: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
+    df = prepare_feature_frame(matches)
+    df["target_home_win"] = (df["winner"] == 1).astype(int)
+    x = df[get_feature_columns()].fillna(0.0)
     y = df["target_home_win"]
     return x, y
+
+
+def build_inference_features(matches: pd.DataFrame) -> pd.DataFrame:
+    df = prepare_feature_frame(matches)
+    return df[get_feature_columns()].fillna(0.0)
