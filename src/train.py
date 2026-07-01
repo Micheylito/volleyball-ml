@@ -3,32 +3,57 @@ from __future__ import annotations
 from pathlib import Path
 
 import joblib
+import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.metrics import classification_report
-from sklearn.model_selection import train_test_split
 
 from src.config import settings
 from src.db import load_dataset_diagnostics, load_matches
 from src.features import build_features
 
 
+def time_based_split(matches, test_size: float = 0.2):
+    sorted_matches = matches.sort_values("match_date").reset_index(drop=True)
+    split_index = int(len(sorted_matches) * (1 - test_size))
+
+    if split_index <= 0 or split_index >= len(sorted_matches):
+        raise ValueError("Not enough rows for a time-based split.")
+
+    train_matches = sorted_matches.iloc[:split_index].copy()
+    test_matches = sorted_matches.iloc[split_index:].copy()
+    return train_matches, test_matches
+
+
 def train_and_evaluate(matches, label: str) -> dict[str, float | int | object]:
-    x, y = build_features(matches)
+    train_matches, test_matches = time_based_split(matches)
+    combined_matches = pd.concat([train_matches, test_matches], ignore_index=True)
+
+    x_all, y_all = build_features(combined_matches)
+    train_rows = len(train_matches)
+    x_train = x_all.iloc[:train_rows]
+    y_train = y_all.iloc[:train_rows]
+    x_test = x_all.iloc[train_rows:]
+    y_test = y_all.iloc[train_rows:]
+
     model = RandomForestClassifier(
         n_estimators=200,
         max_depth=6,
         random_state=42,
     )
 
-    x_train, x_test, y_train, y_test = train_test_split(
-        x, y, test_size=0.2, random_state=42, stratify=y
-    )
-
     print(f"\n=== {label} ===")
     print(f"Loaded rows for modeling: {len(matches)}")
     print(f"Training rows: {len(x_train)}")
     print(f"Test rows: {len(x_test)}")
+    print(
+        f"Train date range: {train_matches['match_date'].min()} -> "
+        f"{train_matches['match_date'].max()}"
+    )
+    print(
+        f"Test date range: {test_matches['match_date'].min()} -> "
+        f"{test_matches['match_date'].max()}"
+    )
 
     model.fit(x_train, y_train)
 
