@@ -51,6 +51,49 @@ WHERE m.status = 'FINISHED'
 ORDER BY m.created_at ASC
 """
 
+DATASET_DIAGNOSTICS_QUERY = """
+SELECT 'all_matches' AS metric, COUNT(*) AS value
+FROM matches
+UNION ALL
+SELECT 'finished_status', COUNT(*)
+FROM matches
+WHERE status = 'FINISHED'
+UNION ALL
+SELECT 'valid_winner', COUNT(*)
+FROM matches
+WHERE winner IN (1, 2)
+UNION ALL
+SELECT 'not_abandoned', COUNT(*)
+FROM matches
+WHERE COALESCE(abandoned, 0) = 0
+UNION ALL
+SELECT 'trainable_matches', COUNT(*)
+FROM matches
+WHERE status = 'FINISHED'
+  AND winner IN (1, 2)
+  AND COALESCE(abandoned, 0) = 0
+UNION ALL
+SELECT 'trainable_with_opening_odds', COUNT(*)
+FROM matches m
+LEFT JOIN (
+    SELECT mo.*
+    FROM match_opening_odds mo
+    INNER JOIN (
+        SELECT match_id, MIN(ts) AS first_ts
+        FROM match_opening_odds
+        GROUP BY match_id
+    ) first_odds
+        ON mo.match_id = first_odds.match_id
+       AND mo.ts = first_odds.first_ts
+) o
+    ON o.match_id = m.id
+WHERE m.status = 'FINISHED'
+  AND m.winner IN (1, 2)
+  AND COALESCE(m.abandoned, 0) = 0
+  AND o.match_win1 IS NOT NULL
+  AND o.match_win2 IS NOT NULL
+"""
+
 
 def load_matches(query: str = DEFAULT_QUERY) -> pd.DataFrame:
     if not settings.db_url:
@@ -64,3 +107,12 @@ def load_matches(query: str = DEFAULT_QUERY) -> pd.DataFrame:
         raise ValueError("The query returned no finished matches. Check DB_URL and source tables.")
 
     return matches
+
+
+def load_dataset_diagnostics(query: str = DATASET_DIAGNOSTICS_QUERY) -> pd.DataFrame:
+    if not settings.db_url:
+        raise ValueError("DB_URL is empty. Fill .env before loading diagnostics.")
+
+    engine = create_engine(settings.db_url)
+    with engine.connect() as connection:
+        return pd.read_sql(text(query), connection)
