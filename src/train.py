@@ -1,0 +1,41 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import joblib
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report
+from sklearn.model_selection import train_test_split
+
+from src.config import settings
+from src.db import load_matches
+from src.features import build_features
+
+
+def main() -> None:
+    matches = load_matches()
+    x, y = build_features(matches)
+
+    x_train, x_test, y_train, y_test = train_test_split(
+        x, y, test_size=0.2, random_state=42, stratify=y
+    )
+
+    model = RandomForestClassifier(
+        n_estimators=200,
+        max_depth=6,
+        random_state=42,
+    )
+    model.fit(x_train, y_train)
+
+    predictions = model.predict(x_test)
+    print(classification_report(y_test, predictions))
+
+    model_path = Path(settings.model_path)
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(model, model_path)
+    print(f"Model saved to {model_path}")
+
+
+if __name__ == "__main__":
+    main()
+
