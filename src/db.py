@@ -54,6 +54,12 @@ SELECT
     COALESCE(o.set1_total_line, f.set1_total_line) AS set1_total_line,
     COALESCE(o.set1_total_over, f.set1_total_over) AS set1_total_over,
     COALESCE(o.set1_total_under, f.set1_total_under) AS set1_total_under,
+    ms1.serves AS home_match_serves,
+    ms1.success AS home_match_serve_success,
+    COALESCE(ms1.pct, ms1.percent / 100.0) AS home_match_serve_pct,
+    ms2.serves AS away_match_serves,
+    ms2.success AS away_match_serve_success,
+    COALESCE(ms2.pct, ms2.percent / 100.0) AS away_match_serve_pct,
     CASE
         WHEN o.match_win1 IS NOT NULL AND o.match_win2 IS NOT NULL THEN 'opening'
         WHEN f.match_win1 IS NOT NULL AND f.match_win2 IS NOT NULL THEN 'first_seen'
@@ -64,6 +70,12 @@ LEFT JOIN opening_odds o
     ON o.match_id = m.id
 LEFT JOIN first_seen_odds f
     ON f.match_id = m.id
+LEFT JOIN match_serve_summary ms1
+    ON ms1.match_id = m.id
+   AND ms1.team = 1
+LEFT JOIN match_serve_summary ms2
+    ON ms2.match_id = m.id
+   AND ms2.team = 2
 WHERE m.status = 'FINISHED'
   AND m.winner IN (1, 2)
   AND COALESCE(m.abandoned, 0) = 0
@@ -145,6 +157,20 @@ WHERE m.status = 'FINISHED'
   AND COALESCE(m.abandoned, 0) = 0
   AND COALESCE(o.match_win1, f.match_win1) IS NOT NULL
   AND COALESCE(o.match_win2, f.match_win2) IS NOT NULL
+UNION ALL
+SELECT 'trainable_with_match_serve_summary', COUNT(*)
+FROM matches m
+LEFT JOIN match_serve_summary ms1
+    ON ms1.match_id = m.id
+   AND ms1.team = 1
+LEFT JOIN match_serve_summary ms2
+    ON ms2.match_id = m.id
+   AND ms2.team = 2
+WHERE m.status = 'FINISHED'
+  AND m.winner IN (1, 2)
+  AND COALESCE(m.abandoned, 0) = 0
+  AND COALESCE(ms1.pct, ms1.percent / 100.0) IS NOT NULL
+  AND COALESCE(ms2.pct, ms2.percent / 100.0) IS NOT NULL
 """
 
 

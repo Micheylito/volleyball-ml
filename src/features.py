@@ -33,6 +33,12 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
     recent_strength_of_schedule = {
         window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
     }
+    recent_serve_pct = {
+        window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
+    }
+    recent_serve_volume = {
+        window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
+    }
     recent_dates: dict[str, pd.Timestamp | None] = defaultdict(lambda: None)
 
     form_values: dict[str, list[float]] = {}
@@ -47,6 +53,10 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
         form_values[f"away_recent_weighted_win_score_{window}"] = []
         form_values[f"home_recent_schedule_strength_{window}"] = []
         form_values[f"away_recent_schedule_strength_{window}"] = []
+        form_values[f"home_recent_serve_pct_{window}"] = []
+        form_values[f"away_recent_serve_pct_{window}"] = []
+        form_values[f"home_recent_serve_volume_{window}"] = []
+        form_values[f"away_recent_serve_volume_{window}"] = []
     home_days_since_last: list[float] = []
     away_days_since_last: list[float] = []
 
@@ -56,6 +66,14 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
         away_team = row.away_team
         home_opponent_class = float(row.team2_class) if pd.notna(row.team2_class) else 0.0
         away_opponent_class = float(row.team1_class) if pd.notna(row.team1_class) else 0.0
+        home_match_serve_pct = (
+            float(row.home_match_serve_pct) if pd.notna(row.home_match_serve_pct) else 0.0
+        )
+        away_match_serve_pct = (
+            float(row.away_match_serve_pct) if pd.notna(row.away_match_serve_pct) else 0.0
+        )
+        home_match_serves = float(row.home_match_serves) if pd.notna(row.home_match_serves) else 0.0
+        away_match_serves = float(row.away_match_serves) if pd.notna(row.away_match_serves) else 0.0
 
         for window in FORM_WINDOWS:
             form_values[f"home_recent_games_{window}"].append(len(recent_wins[window][home_team]))
@@ -84,6 +102,18 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
             form_values[f"away_recent_schedule_strength_{window}"].append(
                 _average(recent_strength_of_schedule[window][away_team])
             )
+            form_values[f"home_recent_serve_pct_{window}"].append(
+                _average(recent_serve_pct[window][home_team])
+            )
+            form_values[f"away_recent_serve_pct_{window}"].append(
+                _average(recent_serve_pct[window][away_team])
+            )
+            form_values[f"home_recent_serve_volume_{window}"].append(
+                _average(recent_serve_volume[window][home_team])
+            )
+            form_values[f"away_recent_serve_volume_{window}"].append(
+                _average(recent_serve_volume[window][away_team])
+            )
         home_days_since_last.append(_days_since(recent_dates[home_team], match_date))
         away_days_since_last.append(_days_since(recent_dates[away_team], match_date))
 
@@ -101,6 +131,10 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
             recent_weighted_wins[window][away_team].append(away_weighted_win)
             recent_strength_of_schedule[window][home_team].append(home_opponent_class)
             recent_strength_of_schedule[window][away_team].append(away_opponent_class)
+            recent_serve_pct[window][home_team].append(home_match_serve_pct)
+            recent_serve_pct[window][away_team].append(away_match_serve_pct)
+            recent_serve_volume[window][home_team].append(home_match_serves)
+            recent_serve_volume[window][away_team].append(away_match_serves)
         recent_dates[home_team] = match_date
         recent_dates[away_team] = match_date
 
@@ -122,6 +156,13 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
         df[f"recent_schedule_strength_gap_{window}"] = (
             df[f"home_recent_schedule_strength_{window}"]
             - df[f"away_recent_schedule_strength_{window}"]
+        )
+        df[f"recent_serve_pct_gap_{window}"] = (
+            df[f"home_recent_serve_pct_{window}"] - df[f"away_recent_serve_pct_{window}"]
+        )
+        df[f"recent_serve_volume_gap_{window}"] = (
+            df[f"home_recent_serve_volume_{window}"]
+            - df[f"away_recent_serve_volume_{window}"]
         )
 
     df["home_days_since_last"] = home_days_since_last
@@ -190,6 +231,12 @@ def build_features(matches: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
                 f"home_recent_schedule_strength_{window}",
                 f"away_recent_schedule_strength_{window}",
                 f"recent_schedule_strength_gap_{window}",
+                f"home_recent_serve_pct_{window}",
+                f"away_recent_serve_pct_{window}",
+                f"recent_serve_pct_gap_{window}",
+                f"home_recent_serve_volume_{window}",
+                f"away_recent_serve_volume_{window}",
+                f"recent_serve_volume_gap_{window}",
             ]
         )
     df[numeric_columns] = df[numeric_columns].apply(pd.to_numeric, errors="coerce")
