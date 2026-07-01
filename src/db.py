@@ -7,6 +7,28 @@ from src.config import settings
 
 
 DEFAULT_QUERY = """
+WITH opening_odds AS (
+    SELECT mo.*
+    FROM match_opening_odds mo
+    INNER JOIN (
+        SELECT match_id, MIN(ts) AS first_ts
+        FROM match_opening_odds
+        GROUP BY match_id
+    ) first_odds
+        ON mo.match_id = first_odds.match_id
+       AND mo.ts = first_odds.first_ts
+),
+first_seen_odds AS (
+    SELECT fo.*
+    FROM match_first_seen_odds fo
+    INNER JOIN (
+        SELECT match_id, MIN(ts) AS first_ts
+        FROM match_first_seen_odds
+        GROUP BY match_id
+    ) first_seen
+        ON fo.match_id = first_seen.match_id
+       AND fo.ts = first_seen.first_ts
+)
 SELECT
     m.id AS match_id,
     m.created_at AS match_date,
@@ -22,18 +44,34 @@ SELECT
     m.team1_class,
     m.team2_class,
     m.match_class,
-    o.match_win1 AS home_odds,
-    o.match_win2 AS away_odds,
-    o.match_total_line,
-    o.match_total_over,
-    o.match_total_under,
-    o.set1_win1,
-    o.set1_win2,
-    o.set1_total_line,
-    o.set1_total_over,
-    o.set1_total_under
+    COALESCE(o.match_win1, f.match_win1) AS home_odds,
+    COALESCE(o.match_win2, f.match_win2) AS away_odds,
+    COALESCE(o.match_total_line, f.match_total_line) AS match_total_line,
+    COALESCE(o.match_total_over, f.match_total_over) AS match_total_over,
+    COALESCE(o.match_total_under, f.match_total_under) AS match_total_under,
+    COALESCE(o.set1_win1, f.set1_win1) AS set1_win1,
+    COALESCE(o.set1_win2, f.set1_win2) AS set1_win2,
+    COALESCE(o.set1_total_line, f.set1_total_line) AS set1_total_line,
+    COALESCE(o.set1_total_over, f.set1_total_over) AS set1_total_over,
+    COALESCE(o.set1_total_under, f.set1_total_under) AS set1_total_under,
+    CASE
+        WHEN o.match_win1 IS NOT NULL AND o.match_win2 IS NOT NULL THEN 'opening'
+        WHEN f.match_win1 IS NOT NULL AND f.match_win2 IS NOT NULL THEN 'first_seen'
+        ELSE 'missing'
+    END AS odds_source
 FROM matches m
-LEFT JOIN (
+LEFT JOIN opening_odds o
+    ON o.match_id = m.id
+LEFT JOIN first_seen_odds f
+    ON f.match_id = m.id
+WHERE m.status = 'FINISHED'
+  AND m.winner IN (1, 2)
+  AND COALESCE(m.abandoned, 0) = 0
+ORDER BY m.created_at ASC
+"""
+
+DATASET_DIAGNOSTICS_QUERY = """
+WITH opening_odds AS (
     SELECT mo.*
     FROM match_opening_odds mo
     INNER JOIN (
@@ -43,15 +81,18 @@ LEFT JOIN (
     ) first_odds
         ON mo.match_id = first_odds.match_id
        AND mo.ts = first_odds.first_ts
-) o
-    ON o.match_id = m.id
-WHERE m.status = 'FINISHED'
-  AND m.winner IN (1, 2)
-  AND COALESCE(m.abandoned, 0) = 0
-ORDER BY m.created_at ASC
-"""
-
-DATASET_DIAGNOSTICS_QUERY = """
+),
+first_seen_odds AS (
+    SELECT fo.*
+    FROM match_first_seen_odds fo
+    INNER JOIN (
+        SELECT match_id, MIN(ts) AS first_ts
+        FROM match_first_seen_odds
+        GROUP BY match_id
+    ) first_seen
+        ON fo.match_id = first_seen.match_id
+       AND fo.ts = first_seen.first_ts
+)
 SELECT 'all_matches' AS metric, COUNT(*) AS value
 FROM matches
 UNION ALL
@@ -75,23 +116,35 @@ WHERE status = 'FINISHED'
 UNION ALL
 SELECT 'trainable_with_opening_odds', COUNT(*)
 FROM matches m
-LEFT JOIN (
-    SELECT mo.*
-    FROM match_opening_odds mo
-    INNER JOIN (
-        SELECT match_id, MIN(ts) AS first_ts
-        FROM match_opening_odds
-        GROUP BY match_id
-    ) first_odds
-        ON mo.match_id = first_odds.match_id
-       AND mo.ts = first_odds.first_ts
-) o
+LEFT JOIN opening_odds o
     ON o.match_id = m.id
 WHERE m.status = 'FINISHED'
   AND m.winner IN (1, 2)
   AND COALESCE(m.abandoned, 0) = 0
   AND o.match_win1 IS NOT NULL
   AND o.match_win2 IS NOT NULL
+UNION ALL
+SELECT 'trainable_with_first_seen_odds', COUNT(*)
+FROM matches m
+LEFT JOIN first_seen_odds f
+    ON f.match_id = m.id
+WHERE m.status = 'FINISHED'
+  AND m.winner IN (1, 2)
+  AND COALESCE(m.abandoned, 0) = 0
+  AND f.match_win1 IS NOT NULL
+  AND f.match_win2 IS NOT NULL
+UNION ALL
+SELECT 'trainable_with_any_odds', COUNT(*)
+FROM matches m
+LEFT JOIN opening_odds o
+    ON o.match_id = m.id
+LEFT JOIN first_seen_odds f
+    ON f.match_id = m.id
+WHERE m.status = 'FINISHED'
+  AND m.winner IN (1, 2)
+  AND COALESCE(m.abandoned, 0) = 0
+  AND COALESCE(o.match_win1, f.match_win1) IS NOT NULL
+  AND COALESCE(o.match_win2, f.match_win2) IS NOT NULL
 """
 
 

@@ -19,6 +19,11 @@ def main() -> None:
         print(f"  {row.metric}: {row.value}")
 
     matches = load_matches()
+    odds_source_counts = matches["odds_source"].value_counts(dropna=False).to_dict()
+    print("Odds source distribution:")
+    for source, count in odds_source_counts.items():
+        print(f"  {source}: {count}")
+
     x, y = build_features(matches)
     print(f"Loaded rows for modeling: {len(matches)}")
 
