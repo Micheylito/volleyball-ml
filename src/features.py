@@ -645,7 +645,7 @@ def prepare_feature_frame(matches: pd.DataFrame) -> pd.DataFrame:
         market_is_away_favorite * (set1_away_prob_norm - market_away_prob_norm)
     )
     market_total_line_per_set = match_total_line / best_of
-    market_total_line_vs_match_gap = market_total_line / market_prob_gap_norm.abs()
+    market_total_line_vs_match_gap = match_total_line / market_prob_gap_norm.abs()
     market_total_line_vs_favorite_edge = match_total_line / market_favorite_edge
     market_set1_total_line_delta_vs_match_total = set1_total_line - market_total_line_per_set
 
