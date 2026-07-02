@@ -167,3 +167,51 @@ def load_serve_streak_rows(query: str = SERVE_STREAK_QUERY) -> pd.DataFrame:
         raise ValueError("The serve streak query returned no rows.")
 
     return rows
+
+
+SET_COMEBACK_QUERY = """
+WITH finished_sets AS (
+    SELECT
+        s.match_id,
+        s.set_number,
+        s.winner AS set_winner,
+        LEAD(s.winner) OVER (
+            PARTITION BY s.match_id
+            ORDER BY s.set_number
+        ) AS next_set_winner
+    FROM sets s
+    INNER JOIN matches m
+        ON m.id = s.match_id
+    WHERE COALESCE(s.finished, 0) = 1
+      AND s.winner IN (1, 2)
+      AND COALESCE(m.abandoned, 0) = 0
+)
+SELECT
+    r.match_id,
+    r.set_number,
+    r.rally_number,
+    r.score1,
+    r.score2,
+    r.created_at AS rally_ts,
+    fs.set_winner,
+    fs.next_set_winner
+FROM rallies r
+INNER JOIN finished_sets fs
+    ON fs.match_id = r.match_id
+   AND fs.set_number = r.set_number
+ORDER BY r.match_id ASC, r.set_number ASC, r.rally_number ASC, r.id ASC
+"""
+
+
+def load_set_comeback_rows(query: str = SET_COMEBACK_QUERY) -> pd.DataFrame:
+    if not settings.db_url:
+        raise ValueError("DB_URL is empty. Fill .env before loading set comeback rows.")
+
+    engine = create_engine(settings.db_url)
+    with engine.connect() as connection:
+        rows = pd.read_sql(text(query), connection)
+
+    if rows.empty:
+        raise ValueError("The set comeback query returned no rows.")
+
+    return rows
