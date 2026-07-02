@@ -78,6 +78,12 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
     league_recent_serve_pct = {
         window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
     }
+    context_recent_wins = {
+        window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
+    }
+    context_recent_serve_pct = {
+        window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
+    }
     recent_dates: dict[str, pd.Timestamp | None] = defaultdict(lambda: None)
 
     form_values: dict[str, list[float]] = {}
@@ -100,6 +106,10 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
         form_values[f"away_league_recent_win_rate_{window}"] = []
         form_values[f"home_league_recent_serve_pct_{window}"] = []
         form_values[f"away_league_recent_serve_pct_{window}"] = []
+        form_values[f"home_context_recent_win_rate_{window}"] = []
+        form_values[f"away_context_recent_win_rate_{window}"] = []
+        form_values[f"home_context_recent_serve_pct_{window}"] = []
+        form_values[f"away_context_recent_serve_pct_{window}"] = []
     home_days_since_last: list[float] = []
     away_days_since_last: list[float] = []
 
@@ -108,8 +118,14 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
         home_team = row.home_team
         away_team = row.away_team
         league = row.league if pd.notna(row.league) else "unknown"
+        country = row.country if pd.notna(row.country) else "unknown"
+        gender = row.gender if pd.notna(row.gender) else "unknown"
+        age_group = row.age_group if pd.notna(row.age_group) else "unknown"
+        context = (country, gender, age_group)
         home_league_key = (home_team, league)
         away_league_key = (away_team, league)
+        home_context_key = (home_team, context)
+        away_context_key = (away_team, context)
         home_opponent_class = float(row.team2_class) if pd.notna(row.team2_class) else 0.0
         away_opponent_class = float(row.team1_class) if pd.notna(row.team1_class) else 0.0
         home_match_serve_pct = (
@@ -172,6 +188,18 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
             form_values[f"away_league_recent_serve_pct_{window}"].append(
                 _average(league_recent_serve_pct[window][away_league_key])
             )
+            form_values[f"home_context_recent_win_rate_{window}"].append(
+                _average(context_recent_wins[window][home_context_key])
+            )
+            form_values[f"away_context_recent_win_rate_{window}"].append(
+                _average(context_recent_wins[window][away_context_key])
+            )
+            form_values[f"home_context_recent_serve_pct_{window}"].append(
+                _average(context_recent_serve_pct[window][home_context_key])
+            )
+            form_values[f"away_context_recent_serve_pct_{window}"].append(
+                _average(context_recent_serve_pct[window][away_context_key])
+            )
         home_days_since_last.append(_days_since(recent_dates[home_team], match_date))
         away_days_since_last.append(_days_since(recent_dates[away_team], match_date))
 
@@ -200,6 +228,10 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
                 league_recent_wins[window][away_league_key].append(away_win)
                 league_recent_serve_pct[window][home_league_key].append(home_match_serve_pct)
                 league_recent_serve_pct[window][away_league_key].append(away_match_serve_pct)
+                context_recent_wins[window][home_context_key].append(home_win)
+                context_recent_wins[window][away_context_key].append(away_win)
+                context_recent_serve_pct[window][home_context_key].append(home_match_serve_pct)
+                context_recent_serve_pct[window][away_context_key].append(away_match_serve_pct)
         recent_dates[home_team] = match_date
         recent_dates[away_team] = match_date
 
@@ -261,6 +293,20 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
                 form_values[f"away_league_recent_serve_pct_{window}"],
             )
         ]
+        derived_values[f"context_recent_win_rate_gap_{window}"] = [
+            home - away
+            for home, away in zip(
+                form_values[f"home_context_recent_win_rate_{window}"],
+                form_values[f"away_context_recent_win_rate_{window}"],
+            )
+        ]
+        derived_values[f"context_recent_serve_pct_gap_{window}"] = [
+            home - away
+            for home, away in zip(
+                form_values[f"home_context_recent_serve_pct_{window}"],
+                form_values[f"away_context_recent_serve_pct_{window}"],
+            )
+        ]
 
     time_values = {
         "home_days_since_last": home_days_since_last,
@@ -304,6 +350,12 @@ def get_feature_columns() -> list[str]:
                 f"home_league_recent_serve_pct_{window}",
                 f"away_league_recent_serve_pct_{window}",
                 f"league_recent_serve_pct_gap_{window}",
+                f"home_context_recent_win_rate_{window}",
+                f"away_context_recent_win_rate_{window}",
+                f"context_recent_win_rate_gap_{window}",
+                f"home_context_recent_serve_pct_{window}",
+                f"away_context_recent_serve_pct_{window}",
+                f"context_recent_serve_pct_gap_{window}",
             ]
         )
     return feature_columns
