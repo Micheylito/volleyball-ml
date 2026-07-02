@@ -72,6 +72,21 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
     recent_serve_volume = {
         window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
     }
+    recent_set_win_rate = {
+        window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
+    }
+    recent_match_length_ratio = {
+        window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
+    }
+    recent_decider_rate = {
+        window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
+    }
+    recent_sweep_win_rate = {
+        window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
+    }
+    recent_swept_loss_rate = {
+        window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
+    }
     league_recent_wins = {
         window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
     }
@@ -102,6 +117,16 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
         form_values[f"away_recent_serve_pct_{window}"] = []
         form_values[f"home_recent_serve_volume_{window}"] = []
         form_values[f"away_recent_serve_volume_{window}"] = []
+        form_values[f"home_recent_set_win_rate_{window}"] = []
+        form_values[f"away_recent_set_win_rate_{window}"] = []
+        form_values[f"home_recent_match_length_ratio_{window}"] = []
+        form_values[f"away_recent_match_length_ratio_{window}"] = []
+        form_values[f"home_recent_decider_rate_{window}"] = []
+        form_values[f"away_recent_decider_rate_{window}"] = []
+        form_values[f"home_recent_sweep_win_rate_{window}"] = []
+        form_values[f"away_recent_sweep_win_rate_{window}"] = []
+        form_values[f"home_recent_swept_loss_rate_{window}"] = []
+        form_values[f"away_recent_swept_loss_rate_{window}"] = []
         form_values[f"home_league_recent_win_rate_{window}"] = []
         form_values[f"away_league_recent_win_rate_{window}"] = []
         form_values[f"home_league_recent_serve_pct_{window}"] = []
@@ -136,6 +161,10 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
         )
         home_match_serves = float(row.home_match_serves) if pd.notna(row.home_match_serves) else 0.0
         away_match_serves = float(row.away_match_serves) if pd.notna(row.away_match_serves) else 0.0
+        completed_sets = float(row.completed_sets) if pd.notna(row.completed_sets) else 0.0
+        home_sets_won = float(row.home_sets_won) if pd.notna(row.home_sets_won) else 0.0
+        away_sets_won = float(row.away_sets_won) if pd.notna(row.away_sets_won) else 0.0
+        best_of_value = float(row.best_of) if pd.notna(row.best_of) and row.best_of else 0.0
 
         for window in FORM_WINDOWS:
             form_values[f"home_recent_games_{window}"].append(len(recent_wins[window][home_team]))
@@ -176,6 +205,36 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
             form_values[f"away_recent_serve_volume_{window}"].append(
                 _average(recent_serve_volume[window][away_team])
             )
+            form_values[f"home_recent_set_win_rate_{window}"].append(
+                _average(recent_set_win_rate[window][home_team])
+            )
+            form_values[f"away_recent_set_win_rate_{window}"].append(
+                _average(recent_set_win_rate[window][away_team])
+            )
+            form_values[f"home_recent_match_length_ratio_{window}"].append(
+                _average(recent_match_length_ratio[window][home_team])
+            )
+            form_values[f"away_recent_match_length_ratio_{window}"].append(
+                _average(recent_match_length_ratio[window][away_team])
+            )
+            form_values[f"home_recent_decider_rate_{window}"].append(
+                _average(recent_decider_rate[window][home_team])
+            )
+            form_values[f"away_recent_decider_rate_{window}"].append(
+                _average(recent_decider_rate[window][away_team])
+            )
+            form_values[f"home_recent_sweep_win_rate_{window}"].append(
+                _average(recent_sweep_win_rate[window][home_team])
+            )
+            form_values[f"away_recent_sweep_win_rate_{window}"].append(
+                _average(recent_sweep_win_rate[window][away_team])
+            )
+            form_values[f"home_recent_swept_loss_rate_{window}"].append(
+                _average(recent_swept_loss_rate[window][home_team])
+            )
+            form_values[f"away_recent_swept_loss_rate_{window}"].append(
+                _average(recent_swept_loss_rate[window][away_team])
+            )
             form_values[f"home_league_recent_win_rate_{window}"].append(
                 _average(league_recent_wins[window][home_league_key])
             )
@@ -207,6 +266,15 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
         away_win = 1 if row.winner == 2 else 0
         home_weighted_win = home_win * (1.0 + home_opponent_class)
         away_weighted_win = away_win * (1.0 + away_opponent_class)
+        total_sets = completed_sets if completed_sets > 0 else home_sets_won + away_sets_won
+        home_set_win_rate = home_sets_won / total_sets if total_sets > 0 else 0.0
+        away_set_win_rate = away_sets_won / total_sets if total_sets > 0 else 0.0
+        match_length_ratio = total_sets / best_of_value if best_of_value > 0 else 0.0
+        decider_played = 1.0 if best_of_value > 0 and total_sets >= best_of_value else 0.0
+        home_sweep_win = 1.0 if home_win == 1 and away_sets_won == 0 and total_sets > 0 else 0.0
+        away_sweep_win = 1.0 if away_win == 1 and home_sets_won == 0 and total_sets > 0 else 0.0
+        home_swept_loss = 1.0 if home_win == 0 and home_sets_won == 0 and total_sets > 0 else 0.0
+        away_swept_loss = 1.0 if away_win == 0 and away_sets_won == 0 and total_sets > 0 else 0.0
 
         # Update history only from resolved matches to avoid leaking live match state
         # into later rows in the same feature build.
@@ -224,6 +292,16 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
                 recent_serve_pct[window][away_team].append(away_match_serve_pct)
                 recent_serve_volume[window][home_team].append(home_match_serves)
                 recent_serve_volume[window][away_team].append(away_match_serves)
+                recent_set_win_rate[window][home_team].append(home_set_win_rate)
+                recent_set_win_rate[window][away_team].append(away_set_win_rate)
+                recent_match_length_ratio[window][home_team].append(match_length_ratio)
+                recent_match_length_ratio[window][away_team].append(match_length_ratio)
+                recent_decider_rate[window][home_team].append(decider_played)
+                recent_decider_rate[window][away_team].append(decider_played)
+                recent_sweep_win_rate[window][home_team].append(home_sweep_win)
+                recent_sweep_win_rate[window][away_team].append(away_sweep_win)
+                recent_swept_loss_rate[window][home_team].append(home_swept_loss)
+                recent_swept_loss_rate[window][away_team].append(away_swept_loss)
                 league_recent_wins[window][home_league_key].append(home_win)
                 league_recent_wins[window][away_league_key].append(away_win)
                 league_recent_serve_pct[window][home_league_key].append(home_match_serve_pct)
@@ -277,6 +355,41 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
             for home, away in zip(
                 form_values[f"home_recent_serve_volume_{window}"],
                 form_values[f"away_recent_serve_volume_{window}"],
+            )
+        ]
+        derived_values[f"recent_set_win_rate_gap_{window}"] = [
+            home - away
+            for home, away in zip(
+                form_values[f"home_recent_set_win_rate_{window}"],
+                form_values[f"away_recent_set_win_rate_{window}"],
+            )
+        ]
+        derived_values[f"recent_match_length_ratio_gap_{window}"] = [
+            home - away
+            for home, away in zip(
+                form_values[f"home_recent_match_length_ratio_{window}"],
+                form_values[f"away_recent_match_length_ratio_{window}"],
+            )
+        ]
+        derived_values[f"recent_decider_rate_gap_{window}"] = [
+            home - away
+            for home, away in zip(
+                form_values[f"home_recent_decider_rate_{window}"],
+                form_values[f"away_recent_decider_rate_{window}"],
+            )
+        ]
+        derived_values[f"recent_sweep_win_rate_gap_{window}"] = [
+            home - away
+            for home, away in zip(
+                form_values[f"home_recent_sweep_win_rate_{window}"],
+                form_values[f"away_recent_sweep_win_rate_{window}"],
+            )
+        ]
+        derived_values[f"recent_swept_loss_rate_gap_{window}"] = [
+            home - away
+            for home, away in zip(
+                form_values[f"home_recent_swept_loss_rate_{window}"],
+                form_values[f"away_recent_swept_loss_rate_{window}"],
             )
         ]
         derived_values[f"league_recent_win_rate_gap_{window}"] = [
@@ -344,6 +457,21 @@ def get_feature_columns() -> list[str]:
                 f"home_recent_serve_volume_{window}",
                 f"away_recent_serve_volume_{window}",
                 f"recent_serve_volume_gap_{window}",
+                f"home_recent_set_win_rate_{window}",
+                f"away_recent_set_win_rate_{window}",
+                f"recent_set_win_rate_gap_{window}",
+                f"home_recent_match_length_ratio_{window}",
+                f"away_recent_match_length_ratio_{window}",
+                f"recent_match_length_ratio_gap_{window}",
+                f"home_recent_decider_rate_{window}",
+                f"away_recent_decider_rate_{window}",
+                f"recent_decider_rate_gap_{window}",
+                f"home_recent_sweep_win_rate_{window}",
+                f"away_recent_sweep_win_rate_{window}",
+                f"recent_sweep_win_rate_gap_{window}",
+                f"home_recent_swept_loss_rate_{window}",
+                f"away_recent_swept_loss_rate_{window}",
+                f"recent_swept_loss_rate_gap_{window}",
                 f"home_league_recent_win_rate_{window}",
                 f"away_league_recent_win_rate_{window}",
                 f"league_recent_win_rate_gap_{window}",

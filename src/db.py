@@ -28,6 +28,15 @@ first_seen_odds AS (
     ) first_seen
         ON fo.match_id = first_seen.match_id
        AND fo.ts = first_seen.first_ts
+),
+set_summary AS (
+    SELECT
+        s.match_id,
+        SUM(CASE WHEN COALESCE(s.finished, 0) = 1 THEN 1 ELSE 0 END) AS completed_sets,
+        SUM(CASE WHEN s.winner = 1 THEN 1 ELSE 0 END) AS home_sets_won,
+        SUM(CASE WHEN s.winner = 2 THEN 1 ELSE 0 END) AS away_sets_won
+    FROM sets s
+    GROUP BY s.match_id
 )
 SELECT
     m.id AS match_id,
@@ -60,6 +69,9 @@ SELECT
     ms2.serves AS away_match_serves,
     ms2.success AS away_match_serve_success,
     COALESCE(ms2.pct, ms2.percent / 100.0) AS away_match_serve_pct,
+    ss.completed_sets,
+    ss.home_sets_won,
+    ss.away_sets_won,
     CASE
         WHEN o.match_win1 IS NOT NULL AND o.match_win2 IS NOT NULL THEN 'opening'
         WHEN f.match_win1 IS NOT NULL AND f.match_win2 IS NOT NULL THEN 'first_seen'
@@ -76,6 +88,8 @@ LEFT JOIN match_serve_summary ms1
 LEFT JOIN match_serve_summary ms2
     ON ms2.match_id = m.id
    AND ms2.team = 2
+LEFT JOIN set_summary ss
+    ON ss.match_id = m.id
 WHERE m.status = 'FINISHED'
   AND m.winner IN (1, 2)
   AND COALESCE(m.abandoned, 0) = 0
@@ -104,6 +118,15 @@ first_seen_odds AS (
     ) first_seen
         ON fo.match_id = first_seen.match_id
        AND fo.ts = first_seen.first_ts
+),
+set_summary AS (
+    SELECT
+        s.match_id,
+        SUM(CASE WHEN COALESCE(s.finished, 0) = 1 THEN 1 ELSE 0 END) AS completed_sets,
+        SUM(CASE WHEN s.winner = 1 THEN 1 ELSE 0 END) AS home_sets_won,
+        SUM(CASE WHEN s.winner = 2 THEN 1 ELSE 0 END) AS away_sets_won
+    FROM sets s
+    GROUP BY s.match_id
 )
 SELECT 'all_matches' AS metric, COUNT(*) AS value
 FROM matches
@@ -171,6 +194,15 @@ WHERE m.status = 'FINISHED'
   AND COALESCE(m.abandoned, 0) = 0
   AND COALESCE(ms1.pct, ms1.percent / 100.0) IS NOT NULL
   AND COALESCE(ms2.pct, ms2.percent / 100.0) IS NOT NULL
+UNION ALL
+SELECT 'trainable_with_completed_sets', COUNT(*)
+FROM matches m
+LEFT JOIN set_summary ss
+    ON ss.match_id = m.id
+WHERE m.status = 'FINISHED'
+  AND m.winner IN (1, 2)
+  AND COALESCE(m.abandoned, 0) = 0
+  AND ss.completed_sets IS NOT NULL
 """
 
 LIVE_MATCHES_QUERY = """
@@ -240,6 +272,9 @@ SELECT
     CAST(NULL AS REAL) AS away_match_serves,
     CAST(NULL AS REAL) AS away_match_serve_success,
     CAST(NULL AS REAL) AS away_match_serve_pct,
+    CAST(NULL AS REAL) AS completed_sets,
+    CAST(NULL AS REAL) AS home_sets_won,
+    CAST(NULL AS REAL) AS away_sets_won,
     ls1.pct AS live_home_serve_pct,
     ls2.pct AS live_away_serve_pct,
     ls1.serves AS live_home_serve_volume,
