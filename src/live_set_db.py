@@ -289,6 +289,62 @@ def load_first_set2_side_market_rows(
     return rows
 
 
+SET2_HCAP_TRAJECTORY_QUERY = """
+WITH latest_rally_odds AS (
+    SELECT *
+    FROM (
+        SELECT
+            ro.*,
+            ROW_NUMBER() OVER (
+                PARTITION BY ro.rally_db_id
+                ORDER BY ro.ts DESC, ro.id DESC
+            ) AS rn
+        FROM rally_odds ro
+        WHERE ro.rally_db_id IS NOT NULL
+          AND ro.odds_status = 'OK'
+          AND ro.set_hcap_line IS NOT NULL
+          AND ro.set_hcap1 IS NOT NULL
+          AND ro.set_hcap2 IS NOT NULL
+    ) ranked
+    WHERE rn = 1
+)
+SELECT
+    r.match_id,
+    COALESCE(lo.ts, r.created_at) AS snapshot_ts,
+    r.id AS rally_db_id,
+    r.rally_number,
+    r.score1,
+    r.score2,
+    lo.set_hcap_line,
+    lo.set_hcap1,
+    lo.set_hcap2
+FROM rallies r
+INNER JOIN latest_rally_odds lo
+    ON lo.rally_db_id = r.id
+INNER JOIN matches m
+    ON m.id = r.match_id
+WHERE r.set_number = 2
+  AND COALESCE(m.abandoned, 0) = 0
+ORDER BY COALESCE(lo.ts, r.created_at) ASC, r.match_id ASC, r.id ASC
+"""
+
+
+def load_set2_hcap_trajectory_rows(
+    query: str = SET2_HCAP_TRAJECTORY_QUERY,
+) -> pd.DataFrame:
+    if not settings.db_url:
+        raise ValueError("DB_URL is empty. Fill .env before loading set2 handicap trajectory rows.")
+
+    engine = create_engine(settings.db_url)
+    with engine.connect() as connection:
+        rows = pd.read_sql(text(query), connection)
+
+    if rows.empty:
+        raise ValueError("The set2 handicap trajectory query returned no rows.")
+
+    return rows
+
+
 SERVE_STREAK_QUERY = """
 SELECT
     r.id AS rally_db_id,
