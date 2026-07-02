@@ -72,6 +72,12 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
     recent_serve_volume = {
         window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
     }
+    league_recent_wins = {
+        window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
+    }
+    league_recent_serve_pct = {
+        window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
+    }
     recent_dates: dict[str, pd.Timestamp | None] = defaultdict(lambda: None)
 
     form_values: dict[str, list[float]] = {}
@@ -90,6 +96,10 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
         form_values[f"away_recent_serve_pct_{window}"] = []
         form_values[f"home_recent_serve_volume_{window}"] = []
         form_values[f"away_recent_serve_volume_{window}"] = []
+        form_values[f"home_league_recent_win_rate_{window}"] = []
+        form_values[f"away_league_recent_win_rate_{window}"] = []
+        form_values[f"home_league_recent_serve_pct_{window}"] = []
+        form_values[f"away_league_recent_serve_pct_{window}"] = []
     home_days_since_last: list[float] = []
     away_days_since_last: list[float] = []
 
@@ -97,6 +107,9 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
         match_date = row.match_date
         home_team = row.home_team
         away_team = row.away_team
+        league = row.league if pd.notna(row.league) else "unknown"
+        home_league_key = (home_team, league)
+        away_league_key = (away_team, league)
         home_opponent_class = float(row.team2_class) if pd.notna(row.team2_class) else 0.0
         away_opponent_class = float(row.team1_class) if pd.notna(row.team1_class) else 0.0
         home_match_serve_pct = (
@@ -147,6 +160,18 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
             form_values[f"away_recent_serve_volume_{window}"].append(
                 _average(recent_serve_volume[window][away_team])
             )
+            form_values[f"home_league_recent_win_rate_{window}"].append(
+                _average(league_recent_wins[window][home_league_key])
+            )
+            form_values[f"away_league_recent_win_rate_{window}"].append(
+                _average(league_recent_wins[window][away_league_key])
+            )
+            form_values[f"home_league_recent_serve_pct_{window}"].append(
+                _average(league_recent_serve_pct[window][home_league_key])
+            )
+            form_values[f"away_league_recent_serve_pct_{window}"].append(
+                _average(league_recent_serve_pct[window][away_league_key])
+            )
         home_days_since_last.append(_days_since(recent_dates[home_team], match_date))
         away_days_since_last.append(_days_since(recent_dates[away_team], match_date))
 
@@ -171,6 +196,10 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
                 recent_serve_pct[window][away_team].append(away_match_serve_pct)
                 recent_serve_volume[window][home_team].append(home_match_serves)
                 recent_serve_volume[window][away_team].append(away_match_serves)
+                league_recent_wins[window][home_league_key].append(home_win)
+                league_recent_wins[window][away_league_key].append(away_win)
+                league_recent_serve_pct[window][home_league_key].append(home_match_serve_pct)
+                league_recent_serve_pct[window][away_league_key].append(away_match_serve_pct)
         recent_dates[home_team] = match_date
         recent_dates[away_team] = match_date
 
@@ -199,6 +228,14 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
         df[f"recent_serve_volume_gap_{window}"] = (
             df[f"home_recent_serve_volume_{window}"]
             - df[f"away_recent_serve_volume_{window}"]
+        )
+        df[f"league_recent_win_rate_gap_{window}"] = (
+            df[f"home_league_recent_win_rate_{window}"]
+            - df[f"away_league_recent_win_rate_{window}"]
+        )
+        df[f"league_recent_serve_pct_gap_{window}"] = (
+            df[f"home_league_recent_serve_pct_{window}"]
+            - df[f"away_league_recent_serve_pct_{window}"]
         )
 
     df["home_days_since_last"] = home_days_since_last
@@ -232,6 +269,12 @@ def get_feature_columns() -> list[str]:
                 f"home_recent_serve_volume_{window}",
                 f"away_recent_serve_volume_{window}",
                 f"recent_serve_volume_gap_{window}",
+                f"home_league_recent_win_rate_{window}",
+                f"away_league_recent_win_rate_{window}",
+                f"league_recent_win_rate_gap_{window}",
+                f"home_league_recent_serve_pct_{window}",
+                f"away_league_recent_serve_pct_{window}",
+                f"league_recent_serve_pct_gap_{window}",
             ]
         )
     return feature_columns
