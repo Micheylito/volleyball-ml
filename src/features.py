@@ -786,6 +786,7 @@ def prepare_feature_frame(matches: pd.DataFrame) -> pd.DataFrame:
         index=df.index,
     )
     df = pd.concat([df, derived_block], axis=1)
+    df = df.loc[:, ~df.columns.duplicated(keep="last")]
     df = df.replace([np.inf, -np.inf], np.nan)
 
     numeric_columns = list(dict.fromkeys(get_feature_columns()))
