@@ -13,50 +13,87 @@ OUTPUT_DIR = Path("data/processed")
 def prepare_serve_streak_frame(rows: pd.DataFrame) -> pd.DataFrame:
     df = rows.copy()
     df["rally_ts"] = pd.to_datetime(df["rally_ts"])
-    df["serve_team"] = pd.to_numeric(df["serve_team"], errors="coerce")
-    df["point_winner"] = pd.to_numeric(df["point_winner"], errors="coerce")
     df["set_number"] = pd.to_numeric(df["set_number"], errors="coerce")
     df["rally_number"] = pd.to_numeric(df["rally_number"], errors="coerce")
     df["score1"] = pd.to_numeric(df["score1"], errors="coerce")
     df["score2"] = pd.to_numeric(df["score2"], errors="coerce")
     df = df[
-        df["serve_team"].isin([1, 2])
-        & df["point_winner"].isin([1, 2])
-        & df["set_number"].notna()
+        df["set_number"].notna()
         & df["rally_number"].notna()
+        & df["score1"].notna()
+        & df["score2"].notna()
     ].copy()
-
-    if df.empty:
-        raise ValueError("No valid rallies left after filtering serve_team/point_winner.")
 
     df = df.sort_values(
         ["match_id", "set_number", "rally_number", "rally_db_id"]
     ).reset_index(drop=True)
 
     streak_before_rally: list[int] = []
+    inferred_point_winners: list[int | None] = []
+    inferred_serve_teams: list[int | None] = []
     current_group: tuple[int, int] | None = None
     current_server = 0
     current_streak = 0
+    previous_score1: float | None = None
+    previous_score2: float | None = None
+    previous_point_winner = 0
 
     for row in df.itertuples(index=False):
         group_key = (int(row.match_id), int(row.set_number))
-        serve_team = int(row.serve_team)
+        score1 = float(row.score1)
+        score2 = float(row.score2)
 
         if group_key != current_group:
             current_group = group_key
             current_server = 0
             current_streak = 0
+            previous_score1 = None
+            previous_score2 = None
+            previous_point_winner = 0
 
-        if serve_team == current_server:
-            current_streak += 1
+        point_winner: int | None = None
+        if previous_score1 is not None and previous_score2 is not None:
+            delta1 = score1 - previous_score1
+            delta2 = score2 - previous_score2
+            if delta1 == 1 and delta2 == 0:
+                point_winner = 1
+            elif delta1 == 0 and delta2 == 1:
+                point_winner = 2
+
+        serve_team: int | None = previous_point_winner if previous_point_winner in (1, 2) else None
+
+        inferred_point_winners.append(point_winner)
+        inferred_serve_teams.append(serve_team)
+
+        if serve_team in (1, 2):
+            if serve_team == current_server:
+                current_streak += 1
+            else:
+                current_server = serve_team
+                current_streak = 1
+            streak_before_rally.append(current_streak)
         else:
-            current_server = serve_team
-            current_streak = 1
+            current_server = 0
+            current_streak = 0
+            streak_before_rally.append(0)
 
-        streak_before_rally.append(current_streak)
+        previous_score1 = score1
+        previous_score2 = score2
+        previous_point_winner = point_winner or 0
 
+    df["inferred_point_winner"] = inferred_point_winners
+    df["inferred_serve_team"] = inferred_serve_teams
     df["serve_streak_before_rally"] = streak_before_rally
-    df["server_won_rally"] = (df["serve_team"] == df["point_winner"]).astype(int)
+    df = df[
+        df["inferred_point_winner"].isin([1, 2])
+        & df["inferred_serve_team"].isin([1, 2])
+        & (df["serve_streak_before_rally"] > 0)
+    ].copy()
+
+    if df.empty:
+        raise ValueError("No valid rallies left after inferring serve streak inputs from score progression.")
+
+    df["server_won_rally"] = (df["inferred_serve_team"] == df["inferred_point_winner"]).astype(int)
     df["set_score_gap"] = (df["score1"] - df["score2"]).abs()
     df["set_total_points"] = df["score1"] + df["score2"]
     df["is_clutch_phase"] = ((df["score1"] >= 20) | (df["score2"] >= 20)).astype(int)
