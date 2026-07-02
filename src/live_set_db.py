@@ -6,7 +6,22 @@ from sqlalchemy import create_engine, text
 from src.config import settings
 
 
-CURRENT_SET_LIVE_QUERY = """
+def build_current_set_live_query(
+    min_total_points: int = 0,
+    rally_step: int = 1,
+) -> str:
+    if rally_step <= 0:
+        raise ValueError("rally_step must be positive.")
+
+    total_points_filter = ""
+    if min_total_points > 0:
+        total_points_filter = f"\n  AND (r.score1 + r.score2) >= {int(min_total_points)}"
+
+    rally_step_filter = ""
+    if rally_step > 1:
+        rally_step_filter = f"\n  AND (r.rally_number % {int(rally_step)}) = 1"
+
+    return f"""
 WITH latest_rally_odds AS (
     SELECT *
     FROM (
@@ -92,17 +107,27 @@ INNER JOIN match_context mc
     ON mc.match_id = r.match_id
 WHERE lo.set_win1 IS NOT NULL
   AND lo.set_win2 IS NOT NULL
+{total_points_filter}
+{rally_step_filter}
 ORDER BY COALESCE(lo.ts, r.created_at) ASC, mc.match_id ASC, r.set_number ASC, r.id ASC
 """
 
 
-def load_current_set_live_rows(query: str = CURRENT_SET_LIVE_QUERY) -> pd.DataFrame:
+def load_current_set_live_rows(
+    query: str | None = None,
+    min_total_points: int = 0,
+    rally_step: int = 1,
+) -> pd.DataFrame:
     if not settings.db_url:
         raise ValueError("DB_URL is empty. Fill .env before loading current set live rows.")
 
+    active_query = query or build_current_set_live_query(
+        min_total_points=min_total_points,
+        rally_step=rally_step,
+    )
     engine = create_engine(settings.db_url)
     with engine.connect() as connection:
-        rows = pd.read_sql(text(query), connection)
+        rows = pd.read_sql(text(active_query), connection)
 
     if rows.empty:
         raise ValueError("The current set live query returned no rows.")

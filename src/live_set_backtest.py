@@ -12,6 +12,8 @@ from src.train import build_model
 
 
 OUTPUT_DIR = Path("data/processed")
+MIN_TOTAL_POINTS = 8
+RALLY_STEP = 3
 
 
 def time_based_split(rows: pd.DataFrame, test_size: float = 0.2) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -39,8 +41,12 @@ def build_summary_frame(test_rows: pd.DataFrame, probabilities, predictions) -> 
 def main() -> None:
     print(f"Current set live backtest model family: {settings.model_family}")
     print(f"Baseline set feature columns: {', '.join(BASELINE_SET_FEATURE_COLUMNS)}")
+    print(f"Sampling filters: min_total_points={MIN_TOTAL_POINTS}, rally_step={RALLY_STEP}")
 
-    rows = load_current_set_live_rows()
+    rows = load_current_set_live_rows(
+        min_total_points=MIN_TOTAL_POINTS,
+        rally_step=RALLY_STEP,
+    )
     train_rows, test_rows = time_based_split(rows)
     combined_rows = pd.concat([train_rows, test_rows], ignore_index=True)
 
