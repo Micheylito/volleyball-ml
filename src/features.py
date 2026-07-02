@@ -4,9 +4,11 @@ from collections import defaultdict, deque
 
 import pandas as pd
 
+from src.config import settings
+
 
 FORM_WINDOWS = (3, 5, 10)
-BASE_FEATURE_COLUMNS = [
+CORE_MARKET_COLUMNS = [
     "home_odds",
     "away_odds",
     "odds_gap",
@@ -27,11 +29,15 @@ BASE_FEATURE_COLUMNS = [
     "set1_total_under",
     "is_women",
     "is_best_of_five",
+    "odds_source_opening",
+    "odds_source_first_seen",
+]
+REST_COLUMNS = [
     "home_days_since_last",
     "away_days_since_last",
     "rest_days_gap",
-    "odds_source_opening",
-    "odds_source_first_seen",
+]
+LIVE_SERVE_COLUMNS = [
     "live_home_serve_pct",
     "live_away_serve_pct",
     "live_serve_pct_gap",
@@ -39,6 +45,16 @@ BASE_FEATURE_COLUMNS = [
     "live_away_serve_volume",
     "live_serve_volume_gap",
 ]
+FEATURE_BLOCKS = (
+    "core_market",
+    "rest",
+    "form_base",
+    "serve_form",
+    "league_form",
+    "context_form",
+    "live_serve",
+    "set_trends",
+)
 
 
 def _average(values: deque[float]) -> float:
@@ -432,60 +448,96 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([df, features_block], axis=1)
 
 
-def get_feature_columns() -> list[str]:
-    feature_columns = BASE_FEATURE_COLUMNS.copy()
-    for window in FORM_WINDOWS:
-        feature_columns.extend(
-            [
-                f"home_recent_games_{window}",
-                f"away_recent_games_{window}",
-                f"home_recent_win_rate_{window}",
-                f"away_recent_win_rate_{window}",
-                f"recent_win_rate_gap_{window}",
-                f"home_recent_opp_class_avg_{window}",
-                f"away_recent_opp_class_avg_{window}",
-                f"recent_opp_class_gap_{window}",
-                f"home_recent_weighted_win_score_{window}",
-                f"away_recent_weighted_win_score_{window}",
-                f"recent_weighted_win_score_gap_{window}",
-                f"home_recent_schedule_strength_{window}",
-                f"away_recent_schedule_strength_{window}",
-                f"recent_schedule_strength_gap_{window}",
-                f"home_recent_serve_pct_{window}",
-                f"away_recent_serve_pct_{window}",
-                f"recent_serve_pct_gap_{window}",
-                f"home_recent_serve_volume_{window}",
-                f"away_recent_serve_volume_{window}",
-                f"recent_serve_volume_gap_{window}",
-                f"home_recent_set_win_rate_{window}",
-                f"away_recent_set_win_rate_{window}",
-                f"recent_set_win_rate_gap_{window}",
-                f"home_recent_match_length_ratio_{window}",
-                f"away_recent_match_length_ratio_{window}",
-                f"recent_match_length_ratio_gap_{window}",
-                f"home_recent_decider_rate_{window}",
-                f"away_recent_decider_rate_{window}",
-                f"recent_decider_rate_gap_{window}",
-                f"home_recent_sweep_win_rate_{window}",
-                f"away_recent_sweep_win_rate_{window}",
-                f"recent_sweep_win_rate_gap_{window}",
-                f"home_recent_swept_loss_rate_{window}",
-                f"away_recent_swept_loss_rate_{window}",
-                f"recent_swept_loss_rate_gap_{window}",
-                f"home_league_recent_win_rate_{window}",
-                f"away_league_recent_win_rate_{window}",
-                f"league_recent_win_rate_gap_{window}",
-                f"home_league_recent_serve_pct_{window}",
-                f"away_league_recent_serve_pct_{window}",
-                f"league_recent_serve_pct_gap_{window}",
-                f"home_context_recent_win_rate_{window}",
-                f"away_context_recent_win_rate_{window}",
-                f"context_recent_win_rate_gap_{window}",
-                f"home_context_recent_serve_pct_{window}",
-                f"away_context_recent_serve_pct_{window}",
-                f"context_recent_serve_pct_gap_{window}",
-            ]
+def get_feature_columns(active_blocks: tuple[str, ...] | None = None) -> list[str]:
+    selected_blocks = active_blocks or settings.feature_blocks
+    unknown_blocks = [block for block in selected_blocks if block not in FEATURE_BLOCKS]
+    if unknown_blocks:
+        raise ValueError(
+            f"Unknown feature blocks: {', '.join(unknown_blocks)}. "
+            f"Allowed blocks: {', '.join(FEATURE_BLOCKS)}"
         )
+
+    feature_columns: list[str] = []
+    if "core_market" in selected_blocks:
+        feature_columns.extend(CORE_MARKET_COLUMNS)
+    if "rest" in selected_blocks:
+        feature_columns.extend(REST_COLUMNS)
+    if "live_serve" in selected_blocks:
+        feature_columns.extend(LIVE_SERVE_COLUMNS)
+
+    for window in FORM_WINDOWS:
+        if "form_base" in selected_blocks:
+            feature_columns.extend(
+                [
+                    f"home_recent_games_{window}",
+                    f"away_recent_games_{window}",
+                    f"home_recent_win_rate_{window}",
+                    f"away_recent_win_rate_{window}",
+                    f"recent_win_rate_gap_{window}",
+                    f"home_recent_opp_class_avg_{window}",
+                    f"away_recent_opp_class_avg_{window}",
+                    f"recent_opp_class_gap_{window}",
+                    f"home_recent_weighted_win_score_{window}",
+                    f"away_recent_weighted_win_score_{window}",
+                    f"recent_weighted_win_score_gap_{window}",
+                    f"home_recent_schedule_strength_{window}",
+                    f"away_recent_schedule_strength_{window}",
+                    f"recent_schedule_strength_gap_{window}",
+                ]
+            )
+        if "serve_form" in selected_blocks:
+            feature_columns.extend(
+                [
+                    f"home_recent_serve_pct_{window}",
+                    f"away_recent_serve_pct_{window}",
+                    f"recent_serve_pct_gap_{window}",
+                    f"home_recent_serve_volume_{window}",
+                    f"away_recent_serve_volume_{window}",
+                    f"recent_serve_volume_gap_{window}",
+                ]
+            )
+        if "set_trends" in selected_blocks:
+            feature_columns.extend(
+                [
+                    f"home_recent_set_win_rate_{window}",
+                    f"away_recent_set_win_rate_{window}",
+                    f"recent_set_win_rate_gap_{window}",
+                    f"home_recent_match_length_ratio_{window}",
+                    f"away_recent_match_length_ratio_{window}",
+                    f"recent_match_length_ratio_gap_{window}",
+                    f"home_recent_decider_rate_{window}",
+                    f"away_recent_decider_rate_{window}",
+                    f"recent_decider_rate_gap_{window}",
+                    f"home_recent_sweep_win_rate_{window}",
+                    f"away_recent_sweep_win_rate_{window}",
+                    f"recent_sweep_win_rate_gap_{window}",
+                    f"home_recent_swept_loss_rate_{window}",
+                    f"away_recent_swept_loss_rate_{window}",
+                    f"recent_swept_loss_rate_gap_{window}",
+                ]
+            )
+        if "league_form" in selected_blocks:
+            feature_columns.extend(
+                [
+                    f"home_league_recent_win_rate_{window}",
+                    f"away_league_recent_win_rate_{window}",
+                    f"league_recent_win_rate_gap_{window}",
+                    f"home_league_recent_serve_pct_{window}",
+                    f"away_league_recent_serve_pct_{window}",
+                    f"league_recent_serve_pct_gap_{window}",
+                ]
+            )
+        if "context_form" in selected_blocks:
+            feature_columns.extend(
+                [
+                    f"home_context_recent_win_rate_{window}",
+                    f"away_context_recent_win_rate_{window}",
+                    f"context_recent_win_rate_gap_{window}",
+                    f"home_context_recent_serve_pct_{window}",
+                    f"away_context_recent_serve_pct_{window}",
+                    f"context_recent_serve_pct_gap_{window}",
+                ]
+            )
     return feature_columns
 
 
@@ -533,11 +585,11 @@ def prepare_feature_frame(matches: pd.DataFrame) -> pd.DataFrame:
 
 def build_features(matches: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
     df = prepare_feature_frame(matches)
-    x = df[get_feature_columns()].fillna(0.0)
+    x = df[get_feature_columns(settings.feature_blocks)].fillna(0.0)
     y = (df["winner"] == 1).astype(int)
     return x, y
 
 
 def build_inference_features(matches: pd.DataFrame) -> pd.DataFrame:
     df = prepare_feature_frame(matches)
-    return df[get_feature_columns()].fillna(0.0)
+    return df[get_feature_columns(settings.feature_blocks)].fillna(0.0)

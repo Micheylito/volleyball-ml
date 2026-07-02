@@ -72,6 +72,7 @@ def train_and_evaluate(matches, label: str) -> dict[str, float | int | object]:
 
 
 def main() -> None:
+    print(f"Active feature blocks: {', '.join(settings.feature_blocks)}")
     diagnostics = load_dataset_diagnostics()
     print("Dataset diagnostics:")
     for row in diagnostics.itertuples(index=False):
