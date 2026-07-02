@@ -211,6 +211,84 @@ def load_first_set2_match_total_rows(
     return rows
 
 
+FIRST_SET2_SIDE_MARKETS_QUERY = """
+WITH latest_rally_odds AS (
+    SELECT *
+    FROM (
+        SELECT
+            ro.*,
+            ROW_NUMBER() OVER (
+                PARTITION BY ro.rally_db_id
+                ORDER BY ro.ts DESC, ro.id DESC
+            ) AS rn
+        FROM rally_odds ro
+        WHERE ro.rally_db_id IS NOT NULL
+          AND ro.odds_status = 'OK'
+          AND ro.set_total_line IS NOT NULL
+          AND ro.set_total_over IS NOT NULL
+          AND ro.set_total_under IS NOT NULL
+    ) ranked
+    WHERE rn = 1
+),
+set2_rows AS (
+    SELECT
+        r.match_id,
+        COALESCE(lo.ts, r.created_at) AS snapshot_ts,
+        r.rally_number,
+        r.score1,
+        r.score2,
+        lo.set_total_line,
+        lo.set_total_over,
+        lo.set_total_under,
+        lo.set_hcap_line,
+        lo.set_hcap1,
+        lo.set_hcap2,
+        ROW_NUMBER() OVER (
+            PARTITION BY r.match_id
+            ORDER BY COALESCE(lo.ts, r.created_at) ASC, r.id ASC
+        ) AS rn
+    FROM rallies r
+    INNER JOIN latest_rally_odds lo
+        ON lo.rally_db_id = r.id
+    INNER JOIN matches m
+        ON m.id = r.match_id
+    WHERE r.set_number = 2
+      AND COALESCE(m.abandoned, 0) = 0
+)
+SELECT
+    match_id,
+    snapshot_ts,
+    rally_number,
+    score1,
+    score2,
+    set_total_line,
+    set_total_over,
+    set_total_under,
+    set_hcap_line,
+    set_hcap1,
+    set_hcap2
+FROM set2_rows
+WHERE rn = 1
+ORDER BY snapshot_ts ASC, match_id ASC
+"""
+
+
+def load_first_set2_side_market_rows(
+    query: str = FIRST_SET2_SIDE_MARKETS_QUERY,
+) -> pd.DataFrame:
+    if not settings.db_url:
+        raise ValueError("DB_URL is empty. Fill .env before loading first set2 side-market rows.")
+
+    engine = create_engine(settings.db_url)
+    with engine.connect() as connection:
+        rows = pd.read_sql(text(query), connection)
+
+    if rows.empty:
+        raise ValueError("The first set2 side-market query returned no rows.")
+
+    return rows
+
+
 SERVE_STREAK_QUERY = """
 SELECT
     r.id AS rally_db_id,
