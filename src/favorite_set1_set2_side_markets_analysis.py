@@ -112,19 +112,23 @@ def prepare_hcap_market(rows: pd.DataFrame) -> pd.DataFrame:
         & df["set_hcap2"].notna()
     ].copy()
 
+    df["favorite_set2_hcap_line"] = df["set_hcap_line"]
     df["favorite_set2_hcap_odds"] = df["set_hcap1"]
     df["favorite_set2_cover"] = (
-        (df["set2_score1"] + df["set_hcap_line"]) > df["set2_score2"]
+        (df["set2_score1"] + df["favorite_set2_hcap_line"]) > df["set2_score2"]
     ).astype(int)
 
     away_favorite_mask = df["favorite_team"] == 2
+    df.loc[away_favorite_mask, "favorite_set2_hcap_line"] = -df.loc[
+        away_favorite_mask, "set_hcap_line"
+    ]
     df.loc[away_favorite_mask, "favorite_set2_hcap_odds"] = df.loc[
         away_favorite_mask, "set_hcap2"
     ]
     df.loc[away_favorite_mask, "favorite_set2_cover"] = (
         (
             df.loc[away_favorite_mask, "set2_score2"]
-            + df.loc[away_favorite_mask, "set_hcap_line"]
+            + df.loc[away_favorite_mask, "favorite_set2_hcap_line"]
         )
         > df.loc[away_favorite_mask, "set2_score1"]
     ).astype(int)
@@ -200,7 +204,7 @@ def summarize_hcap_group(df: pd.DataFrame, label: str) -> dict[str, float | int 
         "samples": int(len(df)),
         "avg_favorite_pre_match_odds": float(df["favorite_pre_match_odds"].mean()),
         "avg_serve_gap": float(df["favorite_set1_serve_gap"].mean()),
-        "avg_line": float(df["set_hcap_line"].mean()),
+        "avg_line": float(df["favorite_set2_hcap_line"].mean()),
         "favorite_cover_rate": cover_rate,
         "avg_favorite_hcap_odds": float(df["favorite_set2_hcap_odds"].mean()),
         "favorite_cover_edge": cover_edge,

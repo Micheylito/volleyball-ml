@@ -44,7 +44,7 @@ def summarize_group(df: pd.DataFrame, label: str) -> dict[str, float | int | str
         "matches": int(df["match_id"].nunique()),
         "avg_favorite_pre_match_odds": float(df["favorite_pre_match_odds"].mean()),
         "avg_serve_gap": float(df["favorite_set1_serve_gap"].mean()),
-        "avg_hcap_line": float(df["set_hcap_line"].mean()),
+        "avg_hcap_line": float(df["favorite_set2_hcap_line"].mean()),
         "avg_favorite_hcap_odds": float(df["favorite_set2_hcap_odds"].mean()),
         "cover_rate": cover_rate,
         "breakeven_rate": breakeven,
@@ -54,7 +54,7 @@ def summarize_group(df: pd.DataFrame, label: str) -> dict[str, float | int | str
 
 def build_summary(rows: pd.DataFrame) -> pd.DataFrame:
     df = rows.copy()
-    df["hcap_line_bucket"] = df["set_hcap_line"].apply(normalize_hcap_line)
+    df["hcap_line_bucket"] = df["favorite_set2_hcap_line"].apply(normalize_hcap_line)
 
     records: list[dict[str, float | int | str]] = []
     for source in ("opening", "first_seen"):
