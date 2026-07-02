@@ -73,11 +73,10 @@ FROM total_points
     with engine.connect() as connection:
         totals = pd.read_sql(text(query), connection)
 
-    merged = rows.merge(totals, on="match_id", how="inner", suffixes=("", "_final"))
+    merged = rows.merge(totals, on="match_id", how="inner")
     merged["total_match_points"] = pd.to_numeric(
-        merged["total_match_points_final"], errors="coerce"
+        merged["total_match_points"], errors="coerce"
     )
-    merged = merged.drop(columns=["total_match_points_final"], errors="ignore")
     return merged
 
 
