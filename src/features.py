@@ -314,6 +314,7 @@ def prepare_feature_frame(matches: pd.DataFrame) -> pd.DataFrame:
     df["match_date"] = pd.to_datetime(df["match_date"])
     df = df.sort_values("match_date").reset_index(drop=True)
     df = add_form_features(df)
+    df["winner"] = pd.to_numeric(df["winner"], errors="coerce")
 
     live_home_serve_pct = pd.to_numeric(df.get("live_home_serve_pct", 0.0), errors="coerce")
     live_away_serve_pct = pd.to_numeric(df.get("live_away_serve_pct", 0.0), errors="coerce")
@@ -326,7 +327,6 @@ def prepare_feature_frame(matches: pd.DataFrame) -> pd.DataFrame:
 
     derived_block = pd.DataFrame(
         {
-            "winner": pd.to_numeric(df["winner"], errors="coerce"),
             "odds_gap": df["away_odds"] - df["home_odds"],
             "implied_home_prob": 1.0 / df["home_odds"],
             "implied_away_prob": 1.0 / df["away_odds"],
