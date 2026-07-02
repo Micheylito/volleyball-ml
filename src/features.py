@@ -80,10 +80,28 @@ MARKET_INTERACTION_COLUMNS = [
     "market_total_line_vs_favorite_edge",
     "market_set1_total_line_delta_vs_match_total",
 ]
+LEAGUE_RELIABILITY_COLUMNS = [
+    "league_reliability_match_count_3",
+    "league_reliability_home_win_rate_3",
+    "league_reliability_favorite_win_rate_3",
+    "league_reliability_market_confidence_3",
+    "league_reliability_market_error_3",
+    "league_reliability_match_count_5",
+    "league_reliability_home_win_rate_5",
+    "league_reliability_favorite_win_rate_5",
+    "league_reliability_market_confidence_5",
+    "league_reliability_market_error_5",
+    "league_reliability_match_count_10",
+    "league_reliability_home_win_rate_10",
+    "league_reliability_favorite_win_rate_10",
+    "league_reliability_market_confidence_10",
+    "league_reliability_market_error_10",
+]
 FEATURE_BLOCKS = (
     "core_market",
     "market_derived",
     "market_interactions",
+    "league_reliability",
     "rest",
     "form_base",
     "serve_form",
@@ -140,6 +158,18 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
     recent_swept_loss_rate = {
         window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
     }
+    league_reliability_home_wins = {
+        window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
+    }
+    league_reliability_favorite_wins = {
+        window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
+    }
+    league_reliability_market_confidence = {
+        window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
+    }
+    league_reliability_market_error = {
+        window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
+    }
     league_recent_wins = {
         window: defaultdict(lambda: deque(maxlen=window)) for window in FORM_WINDOWS
     }
@@ -188,6 +218,11 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
         form_values[f"away_context_recent_win_rate_{window}"] = []
         form_values[f"home_context_recent_serve_pct_{window}"] = []
         form_values[f"away_context_recent_serve_pct_{window}"] = []
+        form_values[f"league_reliability_match_count_{window}"] = []
+        form_values[f"league_reliability_home_win_rate_{window}"] = []
+        form_values[f"league_reliability_favorite_win_rate_{window}"] = []
+        form_values[f"league_reliability_market_confidence_{window}"] = []
+        form_values[f"league_reliability_market_error_{window}"] = []
     home_days_since_last: list[float] = []
     away_days_since_last: list[float] = []
 
@@ -218,6 +253,19 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
         home_sets_won = float(row.home_sets_won) if pd.notna(row.home_sets_won) else 0.0
         away_sets_won = float(row.away_sets_won) if pd.notna(row.away_sets_won) else 0.0
         best_of_value = float(row.best_of) if pd.notna(row.best_of) and row.best_of else 0.0
+        home_odds = float(row.home_odds) if pd.notna(row.home_odds) else 0.0
+        away_odds = float(row.away_odds) if pd.notna(row.away_odds) else 0.0
+        has_match_odds = home_odds > 0 and away_odds > 0
+        implied_home_prob = (1.0 / home_odds) if has_match_odds else 0.0
+        implied_away_prob = (1.0 / away_odds) if has_match_odds else 0.0
+        market_overround = implied_home_prob + implied_away_prob
+        market_home_prob_norm = (
+            implied_home_prob / market_overround if has_match_odds and market_overround > 0 else 0.0
+        )
+        market_away_prob_norm = (
+            implied_away_prob / market_overround if has_match_odds and market_overround > 0 else 0.0
+        )
+        market_prob_gap_norm = market_home_prob_norm - market_away_prob_norm
 
         for window in FORM_WINDOWS:
             form_values[f"home_recent_games_{window}"].append(len(recent_wins[window][home_team]))
@@ -312,6 +360,21 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
             form_values[f"away_context_recent_serve_pct_{window}"].append(
                 _average(context_recent_serve_pct[window][away_context_key])
             )
+            form_values[f"league_reliability_match_count_{window}"].append(
+                len(league_reliability_home_wins[window][league])
+            )
+            form_values[f"league_reliability_home_win_rate_{window}"].append(
+                _average(league_reliability_home_wins[window][league])
+            )
+            form_values[f"league_reliability_favorite_win_rate_{window}"].append(
+                _average(league_reliability_favorite_wins[window][league])
+            )
+            form_values[f"league_reliability_market_confidence_{window}"].append(
+                _average(league_reliability_market_confidence[window][league])
+            )
+            form_values[f"league_reliability_market_error_{window}"].append(
+                _average(league_reliability_market_error[window][league])
+            )
         home_days_since_last.append(_days_since(recent_dates[home_team], match_date))
         away_days_since_last.append(_days_since(recent_dates[away_team], match_date))
 
@@ -328,6 +391,16 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
         away_sweep_win = 1.0 if away_win == 1 and home_sets_won == 0 and total_sets > 0 else 0.0
         home_swept_loss = 1.0 if home_win == 0 and home_sets_won == 0 and total_sets > 0 else 0.0
         away_swept_loss = 1.0 if away_win == 0 and away_sets_won == 0 and total_sets > 0 else 0.0
+        favorite_win = 0.0
+        market_confidence = abs(market_prob_gap_norm)
+        market_error = abs(home_win - market_home_prob_norm) if has_match_odds else 0.0
+        if has_match_odds:
+            if home_odds < away_odds:
+                favorite_win = float(home_win)
+            elif away_odds < home_odds:
+                favorite_win = float(away_win)
+            else:
+                favorite_win = 0.5
 
         # Update history only from resolved matches to avoid leaking live match state
         # into later rows in the same feature build.
@@ -355,6 +428,11 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
                 recent_sweep_win_rate[window][away_team].append(away_sweep_win)
                 recent_swept_loss_rate[window][home_team].append(home_swept_loss)
                 recent_swept_loss_rate[window][away_team].append(away_swept_loss)
+                if has_match_odds:
+                    league_reliability_home_wins[window][league].append(float(home_win))
+                    league_reliability_favorite_wins[window][league].append(favorite_win)
+                    league_reliability_market_confidence[window][league].append(market_confidence)
+                    league_reliability_market_error[window][league].append(market_error)
                 league_recent_wins[window][home_league_key].append(home_win)
                 league_recent_wins[window][away_league_key].append(away_win)
                 league_recent_serve_pct[window][home_league_key].append(home_match_serve_pct)
@@ -505,6 +583,8 @@ def get_feature_columns(active_blocks: tuple[str, ...] | None = None) -> list[st
         feature_columns.extend(MARKET_DERIVED_COLUMNS)
     if "market_interactions" in selected_blocks:
         feature_columns.extend(MARKET_INTERACTION_COLUMNS)
+    if "league_reliability" in selected_blocks:
+        feature_columns.extend(LEAGUE_RELIABILITY_COLUMNS)
 
     for window in FORM_WINDOWS:
         if "form_base" in selected_blocks:
