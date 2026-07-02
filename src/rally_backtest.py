@@ -438,11 +438,11 @@ def run_meta_filter_analysis(
     result_frame = pd.DataFrame(results)
     feature_importance_frame = pd.DataFrame(feature_importance_rows)
     if not feature_importance_frame.empty:
+        feature_importance_frame["abs_coefficient"] = feature_importance_frame["coefficient"].abs()
         feature_importance_frame = feature_importance_frame.sort_values(
-            ["strategy_name", "coefficient"],
+            ["strategy_name", "abs_coefficient"],
             ascending=[True, False],
-            key=lambda values: values.abs(),
-        ).reset_index(drop=True)
+        ).drop(columns=["abs_coefficient"]).reset_index(drop=True)
     return result_frame, feature_importance_frame
 
 
