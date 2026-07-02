@@ -14,6 +14,7 @@ OUTPUT_DIR = Path("data/processed")
 TARGET_SOURCES = ("opening", "first_seen")
 TARGET_MAX_FAVORITE_ODDS = 1.50
 TARGET_MIN_SERVE_GAP = 0.08
+TARGET_MIN_SERVE_PCT = 0.55
 TARGET_HCAP_LINE = -3.5
 
 
@@ -26,6 +27,7 @@ def select_pattern_rows() -> pd.DataFrame:
         (hcap_rows["odds_source"].isin(TARGET_SOURCES))
         & (hcap_rows["favorite_pre_match_odds"] <= TARGET_MAX_FAVORITE_ODDS)
         & (hcap_rows["favorite_set1_serve_gap"] >= TARGET_MIN_SERVE_GAP)
+        & (hcap_rows["favorite_set1_serve_pct"] >= TARGET_MIN_SERVE_PCT)
         & (hcap_rows["favorite_set2_hcap_line"].round(2) == TARGET_HCAP_LINE)
     ].copy()
 
@@ -160,6 +162,7 @@ def main() -> None:
         "Pattern: "
         f"{'/'.join(TARGET_SOURCES)}, favorite_odds <= {TARGET_MAX_FAVORITE_ODDS:.2f}, "
         f"serve_gap >= {TARGET_MIN_SERVE_GAP:.2f}, "
+        f"serve_pct >= {TARGET_MIN_SERVE_PCT:.2f}, "
         f"hcap_line = {TARGET_HCAP_LINE:.1f}"
     )
     print(f"Rows: {len(rows)}")
