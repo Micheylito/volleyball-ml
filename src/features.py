@@ -788,7 +788,7 @@ def prepare_feature_frame(matches: pd.DataFrame) -> pd.DataFrame:
     df = pd.concat([df, derived_block], axis=1)
     df = df.replace([np.inf, -np.inf], np.nan)
 
-    numeric_columns = get_feature_columns()
+    numeric_columns = list(dict.fromkeys(get_feature_columns()))
     df[numeric_columns] = df[numeric_columns].apply(pd.to_numeric, errors="coerce")
     return df
 
