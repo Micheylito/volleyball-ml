@@ -10,6 +10,7 @@ load_dotenv()
 
 DEFAULT_FEATURE_BLOCKS = (
     "core_market",
+    "market_derived",
     "rest",
     "form_base",
     "serve_form",
