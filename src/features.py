@@ -353,9 +353,8 @@ def prepare_feature_frame(matches: pd.DataFrame) -> pd.DataFrame:
 
 def build_features(matches: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
     df = prepare_feature_frame(matches)
-    df["target_home_win"] = (df["winner"] == 1).astype(int)
     x = df[get_feature_columns()].fillna(0.0)
-    y = df["target_home_win"]
+    y = (df["winner"] == 1).astype(int)
     return x, y
 
 
