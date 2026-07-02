@@ -61,6 +61,8 @@ def build_group_summary(predictions: pd.DataFrame) -> pd.DataFrame:
             matches=("match_id", "count"),
             accuracy=("is_correct", "mean"),
             avg_home_win_proba=("pred_home_win_proba", "mean"),
+            avg_home_odds=("home_odds", "mean"),
+            avg_away_odds=("away_odds", "mean"),
         )
         .reset_index()
         .sort_values(["mode", "matches", "accuracy"], ascending=[True, False, False])
@@ -101,6 +103,9 @@ def build_signal_threshold_summary(predictions: pd.DataFrame) -> pd.DataFrame:
                         "coverage": len(home_signals) / len(mode_predictions),
                         "accuracy": float((home_signals["target_home_win"] == 1).mean()),
                         "avg_probability": float(home_signals["pred_home_win_proba"].mean()),
+                        "avg_market_odds": float(home_signals["home_odds"].mean()),
+                        "min_market_odds": float(home_signals["home_odds"].min()),
+                        "max_market_odds": float(home_signals["home_odds"].max()),
                     }
                 )
             else:
@@ -113,6 +118,9 @@ def build_signal_threshold_summary(predictions: pd.DataFrame) -> pd.DataFrame:
                         "coverage": 0.0,
                         "accuracy": 0.0,
                         "avg_probability": 0.0,
+                        "avg_market_odds": 0.0,
+                        "min_market_odds": 0.0,
+                        "max_market_odds": 0.0,
                     }
                 )
 
@@ -126,6 +134,9 @@ def build_signal_threshold_summary(predictions: pd.DataFrame) -> pd.DataFrame:
                         "coverage": len(away_signals) / len(mode_predictions),
                         "accuracy": float((away_signals["target_home_win"] == 0).mean()),
                         "avg_probability": float((1.0 - away_signals["pred_home_win_proba"]).mean()),
+                        "avg_market_odds": float(away_signals["away_odds"].mean()),
+                        "min_market_odds": float(away_signals["away_odds"].min()),
+                        "max_market_odds": float(away_signals["away_odds"].max()),
                     }
                 )
             else:
@@ -138,6 +149,9 @@ def build_signal_threshold_summary(predictions: pd.DataFrame) -> pd.DataFrame:
                         "coverage": 0.0,
                         "accuracy": 0.0,
                         "avg_probability": 0.0,
+                        "avg_market_odds": 0.0,
+                        "min_market_odds": 0.0,
+                        "max_market_odds": 0.0,
                     }
                 )
 
@@ -194,7 +208,9 @@ def main() -> None:
     ).head(12).itertuples(index=False):
         print(
             f"  {row.mode} {row.signal_side} >= {row.threshold:.2f}: "
-            f"signals={row.signals}, accuracy={row.accuracy:.4f}, coverage={row.coverage:.4f}"
+            f"signals={row.signals}, accuracy={row.accuracy:.4f}, coverage={row.coverage:.4f}, "
+            f"avg_odds={row.avg_market_odds:.2f}, "
+            f"range={row.min_market_odds:.2f}-{row.max_market_odds:.2f}"
         )
     print(
         f"Allowed leagues ({LEAGUE_SELECTION_MODE}, min_matches={MIN_LEAGUE_MATCHES}, "
