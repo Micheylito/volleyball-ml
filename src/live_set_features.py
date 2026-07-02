@@ -27,8 +27,8 @@ STREAK_SET_FEATURE_COLUMNS = [
     *BASELINE_SET_FEATURE_COLUMNS,
     "team1_point_streak",
     "team2_point_streak",
-    "has_team1_streak_3plus",
-    "has_team2_streak_3plus",
+    "has_team1_streak_4plus",
+    "has_team2_streak_4plus",
     "streak_gap",
 ]
 
@@ -36,8 +36,8 @@ EXTENDED_CLUTCH_STREAK_FEATURE_COLUMNS = [
     *EXTENDED_SET_FEATURE_COLUMNS,
     "team1_point_streak",
     "team2_point_streak",
-    "has_team1_streak_3plus",
-    "has_team2_streak_3plus",
+    "has_team1_streak_4plus",
+    "has_team2_streak_4plus",
     "streak_gap",
 ]
 
@@ -108,8 +108,8 @@ def prepare_current_set_live_frame(rows: pd.DataFrame) -> pd.DataFrame:
 
     df["team1_point_streak"] = team1_streaks
     df["team2_point_streak"] = team2_streaks
-    df["has_team1_streak_3plus"] = (df["team1_point_streak"] >= 3.0).astype(int)
-    df["has_team2_streak_3plus"] = (df["team2_point_streak"] >= 3.0).astype(int)
+    df["has_team1_streak_4plus"] = (df["team1_point_streak"] >= 4.0).astype(int)
+    df["has_team2_streak_4plus"] = (df["team2_point_streak"] >= 4.0).astype(int)
     df["streak_gap"] = df["team1_point_streak"] - df["team2_point_streak"]
     return df
 

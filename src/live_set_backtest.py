@@ -118,12 +118,12 @@ def main() -> None:
     )
     streak_result, streak_frame = run_experiment(
         rows,
-        "streak_only",
+        "streak_4plus",
         STREAK_SET_FEATURE_COLUMNS,
     )
     clutch_streak_result, clutch_streak_frame = run_experiment(
         rows,
-        "extended_clutch_streak",
+        "extended_clutch_streak_4plus",
         EXTENDED_CLUTCH_STREAK_FEATURE_COLUMNS,
     )
 
