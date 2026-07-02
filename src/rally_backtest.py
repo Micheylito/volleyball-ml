@@ -13,6 +13,8 @@ from src.train import build_model, time_based_split
 OUTPUT_DIR = Path("data/processed")
 SIGNAL_THRESHOLD = 0.80
 BATCH_MATCH_COUNT = 250
+ODDS_BUCKETS = (1.20, 1.40, 1.70, 2.20)
+PRIMARY_SUMMARY_NAME = "first_signal_per_match"
 
 
 def train_reference_model(train_matches: pd.DataFrame):
@@ -146,6 +148,61 @@ def summarize_signals(signals: pd.DataFrame, summary_name: str) -> pd.DataFrame:
     return grouped
 
 
+def _label_odds_bucket(value: float) -> str:
+    if value < ODDS_BUCKETS[0]:
+        return "1.01-1.19"
+    if value < ODDS_BUCKETS[1]:
+        return "1.20-1.39"
+    if value < ODDS_BUCKETS[2]:
+        return "1.40-1.69"
+    if value < ODDS_BUCKETS[3]:
+        return "1.70-2.19"
+    return "2.20+"
+
+
+def summarize_signals_by_odds_bucket(signals: pd.DataFrame, summary_name: str) -> pd.DataFrame:
+    if signals.empty:
+        return pd.DataFrame(
+            columns=[
+                "summary_name",
+                "signal_side",
+                "odds_bucket",
+                "signal_rows",
+                "unique_matches",
+                "accuracy",
+                "avg_probability",
+                "avg_market_odds",
+                "median_market_odds",
+                "min_market_odds",
+                "max_market_odds",
+                "avg_set_number",
+            ]
+        )
+
+    bucketed = signals.copy()
+    bucketed["odds_bucket"] = bucketed["market_odds"].apply(_label_odds_bucket)
+    grouped = (
+        bucketed.groupby(["signal_side", "odds_bucket"], dropna=False)
+        .agg(
+            signal_rows=("match_id", "count"),
+            unique_matches=("match_id", "nunique"),
+            accuracy=("is_correct", "mean"),
+            avg_probability=("signal_probability", "mean"),
+            avg_market_odds=("market_odds", "mean"),
+            median_market_odds=("market_odds", "median"),
+            min_market_odds=("market_odds", "min"),
+            max_market_odds=("market_odds", "max"),
+            avg_set_number=("set_number", "mean"),
+        )
+        .reset_index()
+    )
+    grouped.insert(0, "summary_name", summary_name)
+    return grouped.sort_values(
+        ["signal_side", "odds_bucket"],
+        ascending=[True, True],
+    ).reset_index(drop=True)
+
+
 def main() -> None:
     print(f"Rally backtest model family: {settings.model_family}")
     print(f"Rally backtest feature blocks: {', '.join(settings.feature_blocks)}")
@@ -177,15 +234,21 @@ def main() -> None:
     summary_all = summarize_signals(signal_rows, "all_signal_rows")
     summary_first = summarize_signals(first_signal_rows, "first_signal_per_match")
     combined_summary = pd.concat([summary_all, summary_first], ignore_index=True)
+    bucket_summary = summarize_signals_by_odds_bucket(
+        first_signal_rows,
+        PRIMARY_SUMMARY_NAME,
+    )
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     signal_rows_path = OUTPUT_DIR / "rally_backtest_signal_rows.csv"
     first_signal_rows_path = OUTPUT_DIR / "rally_backtest_first_signal_rows.csv"
     summary_path = OUTPUT_DIR / "rally_backtest_signal_summary.csv"
+    bucket_summary_path = OUTPUT_DIR / "rally_backtest_first_signal_odds_buckets.csv"
 
     signal_rows.to_csv(signal_rows_path, index=False)
     first_signal_rows.to_csv(first_signal_rows_path, index=False)
     combined_summary.to_csv(summary_path, index=False)
+    bucket_summary.to_csv(bucket_summary_path, index=False)
 
     print("Rally signal summary:")
     if combined_summary.empty:
@@ -201,9 +264,24 @@ def main() -> None:
                 f"range={row.min_market_odds:.2f}-{row.max_market_odds:.2f}"
             )
 
+    print(f"\nPrimary mode: {PRIMARY_SUMMARY_NAME} (1 bet = 1 match)")
+    print("Odds bucket summary:")
+    if bucket_summary.empty:
+        print("  No first-signal rows found above threshold.")
+    else:
+        for row in bucket_summary.itertuples(index=False):
+            print(
+                f"  {row.signal_side} | {row.odds_bucket}: "
+                f"rows={row.signal_rows}, matches={row.unique_matches}, "
+                f"accuracy={row.accuracy:.4f}, avg_odds={row.avg_market_odds:.2f}, "
+                f"median_odds={row.median_market_odds:.2f}, "
+                f"range={row.min_market_odds:.2f}-{row.max_market_odds:.2f}"
+            )
+
     print(f"Signal rows saved to {signal_rows_path}")
     print(f"First signal rows saved to {first_signal_rows_path}")
     print(f"Signal summary saved to {summary_path}")
+    print(f"First-signal odds buckets saved to {bucket_summary_path}")
 
 
 if __name__ == "__main__":
