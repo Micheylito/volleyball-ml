@@ -12,6 +12,7 @@ from src.train import build_model, time_based_split
 
 OUTPUT_DIR = Path("data/processed")
 SIGNAL_THRESHOLD = 0.80
+BATCH_MATCH_COUNT = 250
 
 
 def train_reference_model(train_matches: pd.DataFrame):
@@ -19,6 +20,13 @@ def train_reference_model(train_matches: pd.DataFrame):
     model = build_model(settings.model_family)
     model.fit(x_train, y_train)
     return model
+
+
+def _chunk_match_ids(match_ids: list[int], chunk_size: int) -> list[list[int]]:
+    return [
+        match_ids[index : index + chunk_size]
+        for index in range(0, len(match_ids), chunk_size)
+    ]
 
 
 def build_signal_rows(
@@ -63,6 +71,38 @@ def build_signal_rows(
         ["snapshot_ts", "match_id", "set_number", "rally_number"],
         ascending=[True, True, True, True],
     ).reset_index(drop=True)
+
+
+def build_signal_rows_in_batches(
+    model,
+    train_matches: pd.DataFrame,
+    test_match_ids: list[int],
+) -> tuple[pd.DataFrame, int]:
+    signal_frames: list[pd.DataFrame] = []
+    total_snapshots = 0
+    match_id_batches = _chunk_match_ids(test_match_ids, BATCH_MATCH_COUNT)
+
+    for batch_index, match_id_batch in enumerate(match_id_batches, start=1):
+        rally_snapshots = load_rally_backtest_snapshots(match_id_batch)
+        total_snapshots += len(rally_snapshots)
+        print(
+            f"Processing batch {batch_index}/{len(match_id_batches)}: "
+            f"matches={len(match_id_batch)}, snapshots={len(rally_snapshots)}"
+        )
+        batch_signals = build_signal_rows(model, train_matches, rally_snapshots)
+        print(f"  Signals in batch: {len(batch_signals)}")
+        if not batch_signals.empty:
+            signal_frames.append(batch_signals)
+
+    if not signal_frames:
+        return pd.DataFrame(), total_snapshots
+
+    signal_rows = pd.concat(signal_frames, ignore_index=True)
+    signal_rows = signal_rows.sort_values(
+        ["snapshot_ts", "match_id", "set_number", "rally_number"],
+        ascending=[True, True, True, True],
+    ).reset_index(drop=True)
+    return signal_rows, total_snapshots
 
 
 def summarize_signals(signals: pd.DataFrame, summary_name: str) -> pd.DataFrame:
@@ -116,12 +156,16 @@ def main() -> None:
     model = train_reference_model(train_matches)
 
     test_match_ids = test_matches["match_id"].astype(int).tolist()
-    rally_snapshots = load_rally_backtest_snapshots(test_match_ids)
     print(f"Train matches: {len(train_matches)}")
     print(f"Test matches: {len(test_matches)}")
-    print(f"Loaded rally snapshots: {len(rally_snapshots)}")
+    print(f"Batch match count: {BATCH_MATCH_COUNT}")
 
-    signal_rows = build_signal_rows(model, train_matches, rally_snapshots)
+    signal_rows, total_snapshots = build_signal_rows_in_batches(
+        model,
+        train_matches,
+        test_match_ids,
+    )
+    print(f"Loaded rally snapshots: {total_snapshots}")
     print(f"Signal rows above threshold: {len(signal_rows)}")
 
     first_signal_rows = (
