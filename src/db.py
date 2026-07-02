@@ -332,8 +332,8 @@ first_seen_odds AS (
         ON fo.match_id = first_seen.match_id
        AND fo.ts = first_seen.first_ts
 ),
-    
-WITH rallies_enriched AS (
+
+rallies_enriched AS (
     SELECT
         r.id AS rally_db_id,
         r.match_id,
