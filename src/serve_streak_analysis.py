@@ -13,6 +13,22 @@ OUTPUT_DIR = Path("data/processed")
 def prepare_serve_streak_frame(rows: pd.DataFrame) -> pd.DataFrame:
     df = rows.copy()
     df["rally_ts"] = pd.to_datetime(df["rally_ts"])
+    df["serve_team"] = pd.to_numeric(df["serve_team"], errors="coerce")
+    df["point_winner"] = pd.to_numeric(df["point_winner"], errors="coerce")
+    df["set_number"] = pd.to_numeric(df["set_number"], errors="coerce")
+    df["rally_number"] = pd.to_numeric(df["rally_number"], errors="coerce")
+    df["score1"] = pd.to_numeric(df["score1"], errors="coerce")
+    df["score2"] = pd.to_numeric(df["score2"], errors="coerce")
+    df = df[
+        df["serve_team"].isin([1, 2])
+        & df["point_winner"].isin([1, 2])
+        & df["set_number"].notna()
+        & df["rally_number"].notna()
+    ].copy()
+
+    if df.empty:
+        raise ValueError("No valid rallies left after filtering serve_team/point_winner.")
+
     df = df.sort_values(
         ["match_id", "set_number", "rally_number", "rally_db_id"]
     ).reset_index(drop=True)

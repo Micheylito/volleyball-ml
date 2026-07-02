@@ -150,9 +150,7 @@ SELECT
 FROM rallies r
 INNER JOIN matches m
     ON m.id = r.match_id
-WHERE r.serve_team IN (1, 2)
-  AND r.point_winner IN (1, 2)
-  AND COALESCE(m.abandoned, 0) = 0
+WHERE COALESCE(m.abandoned, 0) = 0
 ORDER BY r.match_id ASC, r.set_number ASC, r.rally_number ASC, r.id ASC
 """
 
