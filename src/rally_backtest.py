@@ -26,6 +26,27 @@ LIVE_FEATURE_COLUMNS = [
     "live_match_prob_shift_from_reference",
     "live_set_match_gap_delta",
 ]
+LIVE_EXPERIMENTS = (
+    ("set_baseline_filter", ["signal_probability", "live_set_number", "live_set_match_gap_delta"]),
+    (
+        "set_plus_score_gap_filter",
+        ["signal_probability", "live_set_number", "live_set_match_gap_delta", "live_score_gap"],
+    ),
+    (
+        "set_plus_total_points_filter",
+        ["signal_probability", "live_set_number", "live_set_match_gap_delta", "live_total_points"],
+    ),
+    (
+        "set_plus_match_shift_filter",
+        [
+            "signal_probability",
+            "live_set_number",
+            "live_set_match_gap_delta",
+            "live_match_prob_shift_from_reference",
+        ],
+    ),
+    ("live_enhanced_filter", ["signal_probability", *LIVE_FEATURE_COLUMNS]),
+)
 
 
 def train_reference_model(train_matches: pd.DataFrame):
@@ -354,6 +375,8 @@ def run_meta_filter_analysis(
         }
     )
 
+    feature_importance_rows: list[dict[str, float | str]] = []
+
     probability_only_model = LogisticRegression(max_iter=1000)
     probability_only_model.fit(
         train_zone[["signal_probability"]].fillna(0.0),
@@ -366,25 +389,9 @@ def run_meta_filter_analysis(
         test_signals[["signal_probability"]].fillna(0.0)
     )[:, 1]
 
-    enhanced_columns = ["signal_probability", *LIVE_FEATURE_COLUMNS]
-    enhanced_model = LogisticRegression(max_iter=1000)
-    enhanced_model.fit(
-        train_zone[enhanced_columns].fillna(0.0),
-        train_zone["is_correct"],
-    )
-    train_signals["meta_live_enhanced"] = enhanced_model.predict_proba(
-        train_signals[enhanced_columns].fillna(0.0)
-    )[:, 1]
-    test_signals["meta_live_enhanced"] = enhanced_model.predict_proba(
-        test_signals[enhanced_columns].fillna(0.0)
-    )[:, 1]
-
     train_zone = train_signals[train_signals["odds_bucket"] == FOCUSED_ODDS_BUCKET].copy()
     test_zone = test_signals[test_signals["odds_bucket"] == FOCUSED_ODDS_BUCKET].copy()
-
     probability_only_threshold = select_meta_threshold(train_zone, "meta_probability_only")
-    enhanced_threshold = select_meta_threshold(train_zone, "meta_live_enhanced")
-
     results.append(
         summarize_meta_strategy(
             test_zone,
@@ -393,22 +400,49 @@ def run_meta_filter_analysis(
             probability_only_threshold,
         )
     )
-    results.append(
-        summarize_meta_strategy(
-            test_zone,
-            "live_enhanced_filter",
-            "meta_live_enhanced",
-            enhanced_threshold,
+
+    for strategy_name, feature_columns in LIVE_EXPERIMENTS:
+        experiment_model = LogisticRegression(max_iter=1000)
+        experiment_model.fit(
+            train_zone[feature_columns].fillna(0.0),
+            train_zone["is_correct"],
         )
-    )
+        prediction_column = f"meta_{strategy_name}"
+        train_signals[prediction_column] = experiment_model.predict_proba(
+            train_signals[feature_columns].fillna(0.0)
+        )[:, 1]
+        test_signals[prediction_column] = experiment_model.predict_proba(
+            test_signals[feature_columns].fillna(0.0)
+        )[:, 1]
+
+        train_zone = train_signals[train_signals["odds_bucket"] == FOCUSED_ODDS_BUCKET].copy()
+        test_zone = test_signals[test_signals["odds_bucket"] == FOCUSED_ODDS_BUCKET].copy()
+        keep_threshold = select_meta_threshold(train_zone, prediction_column)
+        results.append(
+            summarize_meta_strategy(
+                test_zone,
+                strategy_name,
+                prediction_column,
+                keep_threshold,
+            )
+        )
+        for feature_name, coefficient in zip(feature_columns, experiment_model.coef_[0]):
+            feature_importance_rows.append(
+                {
+                    "strategy_name": strategy_name,
+                    "feature": feature_name,
+                    "coefficient": float(coefficient),
+                }
+            )
 
     result_frame = pd.DataFrame(results)
-    feature_importance_frame = pd.DataFrame(
-        {
-            "feature": ["signal_probability", *LIVE_FEATURE_COLUMNS],
-            "coefficient": enhanced_model.coef_[0],
-        }
-    ).sort_values("coefficient", ascending=False, key=lambda values: values.abs())
+    feature_importance_frame = pd.DataFrame(feature_importance_rows)
+    if not feature_importance_frame.empty:
+        feature_importance_frame = feature_importance_frame.sort_values(
+            ["strategy_name", "coefficient"],
+            ascending=[True, False],
+            key=lambda values: values.abs(),
+        ).reset_index(drop=True)
     return result_frame, feature_importance_frame
 
 
