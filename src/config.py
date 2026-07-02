@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+DEFAULT_MODEL_FAMILY = "random_forest"
 DEFAULT_FEATURE_BLOCKS = (
     "core_market",
     "market_derived",
@@ -30,6 +31,11 @@ def _parse_optional_feature_blocks(raw_value: str) -> tuple[str, ...] | None:
     return tuple(blocks) if blocks else None
 
 
+def _parse_optional_string(raw_value: str) -> str | None:
+    value = raw_value.strip()
+    return value if value else None
+
+
 @dataclass(frozen=True)
 class Settings:
     db_url: str = os.getenv("DB_URL", "")
@@ -38,6 +44,10 @@ class Settings:
     model_path: str = os.getenv("MODEL_PATH", "models/match_model.joblib")
     data_export_path: str = os.getenv("DATA_EXPORT_PATH", "data/raw/matches.csv")
     prediction_threshold: float = float(os.getenv("PREDICTION_THRESHOLD", "0.62"))
+    model_family: str = os.getenv("MODEL_FAMILY", DEFAULT_MODEL_FAMILY).strip() or DEFAULT_MODEL_FAMILY
+    compare_model_family: str | None = _parse_optional_string(
+        os.getenv("COMPARE_MODEL_FAMILY", "")
+    )
     feature_blocks: tuple[str, ...] = _parse_feature_blocks(
         os.getenv("FEATURE_BLOCKS", ",".join(DEFAULT_FEATURE_BLOCKS))
     )
