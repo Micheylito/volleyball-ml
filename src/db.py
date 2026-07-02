@@ -303,6 +303,135 @@ ORDER BY m.created_at ASC
 """
 
 
+def build_rally_backtest_query(match_ids: list[int]) -> str:
+    unique_ids = sorted({int(match_id) for match_id in match_ids})
+    if not unique_ids:
+        raise ValueError("match_ids is empty.")
+
+    ids_sql = ", ".join(str(match_id) for match_id in unique_ids)
+    return f"""
+WITH rallies_enriched AS (
+    SELECT
+        r.id AS rally_db_id,
+        r.match_id,
+        r.set_number,
+        r.rally_number,
+        r.score1,
+        r.score2,
+        r.created_at,
+        r.serve_team,
+        SUM(CASE WHEN r.serve_team = 1 THEN 1 ELSE 0 END) OVER (
+            PARTITION BY r.match_id
+            ORDER BY r.id
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS live_home_serve_volume,
+        SUM(CASE WHEN r.serve_team = 2 THEN 1 ELSE 0 END) OVER (
+            PARTITION BY r.match_id
+            ORDER BY r.id
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS live_away_serve_volume,
+        SUM(CASE WHEN r.serve_team = 1 AND r.point_winner = 1 THEN 1 ELSE 0 END) OVER (
+            PARTITION BY r.match_id
+            ORDER BY r.id
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS live_home_serve_wins,
+        SUM(CASE WHEN r.serve_team = 2 AND r.point_winner = 2 THEN 1 ELSE 0 END) OVER (
+            PARTITION BY r.match_id
+            ORDER BY r.id
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS live_away_serve_wins
+    FROM rallies r
+    WHERE r.match_id IN ({ids_sql})
+),
+latest_rally_odds AS (
+    SELECT *
+    FROM (
+        SELECT
+            ro.*,
+            ROW_NUMBER() OVER (
+                PARTITION BY ro.rally_db_id
+                ORDER BY ro.ts DESC, ro.id DESC
+            ) AS rn
+        FROM rally_odds ro
+        WHERE ro.rally_db_id IS NOT NULL
+          AND ro.odds_status = 'OK'
+    ) ranked
+    WHERE rn = 1
+)
+SELECT
+    m.id AS match_id,
+    COALESCE(lo.ts, re.created_at) AS match_date,
+    m.tournament AS league,
+    m.country,
+    m.gender,
+    m.age_group,
+    m.best_of,
+    m.team1 AS home_team,
+    m.team2 AS away_team,
+    m.status,
+    CAST(NULL AS INTEGER) AS winner,
+    m.winner AS actual_winner,
+    m.team1_class,
+    m.team2_class,
+    m.match_class,
+    lo.match_win1 AS home_odds,
+    lo.match_win2 AS away_odds,
+    lo.match_total_line AS match_total_line,
+    lo.match_total_over AS match_total_over,
+    lo.match_total_under AS match_total_under,
+    lo.set_win1 AS set1_win1,
+    lo.set_win2 AS set1_win2,
+    lo.set_total_line AS set1_total_line,
+    lo.set_total_over AS set1_total_over,
+    lo.set_total_under AS set1_total_under,
+    CAST(NULL AS REAL) AS home_match_serves,
+    CAST(NULL AS REAL) AS home_match_serve_success,
+    CAST(NULL AS REAL) AS home_match_serve_pct,
+    CAST(NULL AS REAL) AS away_match_serves,
+    CAST(NULL AS REAL) AS away_match_serve_success,
+    CAST(NULL AS REAL) AS away_match_serve_pct,
+    CAST(NULL AS REAL) AS completed_sets,
+    CAST(NULL AS REAL) AS home_sets_won,
+    CAST(NULL AS REAL) AS away_sets_won,
+    CASE
+        WHEN re.live_home_serve_volume > 0
+        THEN CAST(re.live_home_serve_wins AS REAL) / re.live_home_serve_volume
+        ELSE NULL
+    END AS live_home_serve_pct,
+    CASE
+        WHEN re.live_away_serve_volume > 0
+        THEN CAST(re.live_away_serve_wins AS REAL) / re.live_away_serve_volume
+        ELSE NULL
+    END AS live_away_serve_pct,
+    CAST(re.live_home_serve_volume AS REAL) AS live_home_serve_volume,
+    CAST(re.live_away_serve_volume AS REAL) AS live_away_serve_volume,
+    'rally_live' AS odds_source,
+    re.rally_db_id,
+    re.set_number,
+    re.rally_number,
+    re.score1,
+    re.score2,
+    lo.ts AS odds_ts,
+    lo.match_hcap_line,
+    lo.match_hcap1,
+    lo.match_hcap2,
+    lo.set_hcap_line,
+    lo.set_hcap1,
+    lo.set_hcap2
+FROM rallies_enriched re
+INNER JOIN latest_rally_odds lo
+    ON lo.rally_db_id = re.rally_db_id
+INNER JOIN matches m
+    ON m.id = re.match_id
+WHERE m.id IN ({ids_sql})
+  AND m.winner IN (1, 2)
+  AND COALESCE(m.abandoned, 0) = 0
+  AND lo.match_win1 IS NOT NULL
+  AND lo.match_win2 IS NOT NULL
+ORDER BY COALESCE(lo.ts, re.created_at) ASC, m.id ASC, re.rally_db_id ASC
+"""
+
+
 def load_matches(query: str = DEFAULT_QUERY) -> pd.DataFrame:
     if not settings.db_url:
         raise ValueError("DB_URL is empty. Fill .env before loading matches.")
@@ -330,6 +459,16 @@ def load_live_matches(query: str = LIVE_MATCHES_QUERY) -> pd.DataFrame:
     if not settings.db_url:
         raise ValueError("DB_URL is empty. Fill .env before loading live matches.")
 
+    engine = create_engine(settings.db_url)
+    with engine.connect() as connection:
+        return pd.read_sql(text(query), connection)
+
+
+def load_rally_backtest_snapshots(match_ids: list[int]) -> pd.DataFrame:
+    if not settings.db_url:
+        raise ValueError("DB_URL is empty. Fill .env before loading rally snapshots.")
+
+    query = build_rally_backtest_query(match_ids)
     engine = create_engine(settings.db_url)
     with engine.connect() as connection:
         return pd.read_sql(text(query), connection)

@@ -441,8 +441,8 @@ def add_form_features(matches: pd.DataFrame) -> pd.DataFrame:
                 context_recent_wins[window][away_context_key].append(away_win)
                 context_recent_serve_pct[window][home_context_key].append(home_match_serve_pct)
                 context_recent_serve_pct[window][away_context_key].append(away_match_serve_pct)
-        recent_dates[home_team] = match_date
-        recent_dates[away_team] = match_date
+            recent_dates[home_team] = match_date
+            recent_dates[away_team] = match_date
 
     derived_values: dict[str, list[float]] = {}
     for window in FORM_WINDOWS:
