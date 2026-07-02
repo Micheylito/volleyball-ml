@@ -76,12 +76,18 @@ def build_summary(records: pd.DataFrame, lead_threshold: int = LEAD_THRESHOLD) -
             "group": "all_set_losers_with_next_set",
             "samples": int(len(control)),
             "lose_next_set_rate": float(control["lost_next_set"].mean()) if not control.empty else 0.0,
+            "win_next_set_rate": float(1.0 - control["lost_next_set"].mean())
+            if not control.empty
+            else 0.0,
             "avg_max_lead": float(control["max_lead"].mean()) if not control.empty else 0.0,
         },
         {
             "group": f"blew_{lead_threshold}plus_lead_and_lost_set",
             "samples": int(len(blown_lead)),
             "lose_next_set_rate": float(blown_lead["lost_next_set"].mean())
+            if not blown_lead.empty
+            else 0.0,
+            "win_next_set_rate": float(1.0 - blown_lead["lost_next_set"].mean())
             if not blown_lead.empty
             else 0.0,
             "avg_max_lead": float(blown_lead["max_lead"].mean()) if not blown_lead.empty else 0.0,
@@ -107,6 +113,7 @@ def main() -> None:
         print(
             f"  {row.group}: samples={row.samples}, "
             f"lose_next_set_rate={row.lose_next_set_rate:.4f}, "
+            f"win_next_set_rate={row.win_next_set_rate:.4f}, "
             f"avg_max_lead={row.avg_max_lead:.2f}"
         )
     print(f"Summary saved to {summary_path}")
