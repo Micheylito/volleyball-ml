@@ -371,6 +371,97 @@ WHERE m.status = 'FINISHED'
 ORDER BY m.created_at ASC
 """
 
+FAVORITE_SET1_SERVE_QUERY = """
+WITH opening_odds AS (
+    SELECT mo.*
+    FROM match_opening_odds mo
+    INNER JOIN (
+        SELECT match_id, MIN(ts) AS first_ts
+        FROM match_opening_odds
+        GROUP BY match_id
+    ) first_odds
+        ON mo.match_id = first_odds.match_id
+       AND mo.ts = first_odds.first_ts
+),
+first_seen_odds AS (
+    SELECT fo.*
+    FROM match_first_seen_odds fo
+    INNER JOIN (
+        SELECT match_id, MIN(ts) AS first_ts
+        FROM match_first_seen_odds
+        GROUP BY match_id
+    ) first_seen
+        ON fo.match_id = first_seen.match_id
+       AND fo.ts = first_seen.first_ts
+),
+set_results AS (
+    SELECT
+        s.match_id,
+        MAX(CASE WHEN s.set_number = 1 THEN s.winner END) AS set1_winner,
+        MAX(CASE WHEN s.set_number = 2 THEN s.winner END) AS set2_winner,
+        MAX(CASE WHEN s.set_number = 3 THEN s.winner END) AS set3_winner
+    FROM sets s
+    WHERE COALESCE(s.finished, 0) = 1
+      AND s.winner IN (1, 2)
+    GROUP BY s.match_id
+)
+SELECT
+    m.id AS match_id,
+    m.created_at AS match_date,
+    m.tournament AS league,
+    m.country,
+    m.gender,
+    m.age_group,
+    m.best_of,
+    m.team1 AS home_team,
+    m.team2 AS away_team,
+    m.winner AS match_winner,
+    COALESCE(o.match_win1, f.match_win1) AS home_odds,
+    COALESCE(o.match_win2, f.match_win2) AS away_odds,
+    CASE
+        WHEN o.match_win1 IS NOT NULL AND o.match_win2 IS NOT NULL THEN 'opening'
+        WHEN f.match_win1 IS NOT NULL AND f.match_win2 IS NOT NULL THEN 'first_seen'
+        ELSE 'missing'
+    END AS odds_source,
+    sr.set1_winner,
+    sr.set2_winner,
+    sr.set3_winner,
+    ms1.serves AS set1_home_serves,
+    ms1.serve_wins AS set1_home_serve_wins,
+    CASE
+        WHEN ms1.pct > 1 THEN ms1.pct / 100.0
+        ELSE ms1.pct
+    END AS set1_home_serve_pct,
+    ms2.serves AS set1_away_serves,
+    ms2.serve_wins AS set1_away_serve_wins,
+    CASE
+        WHEN ms2.pct > 1 THEN ms2.pct / 100.0
+        ELSE ms2.pct
+    END AS set1_away_serve_pct
+FROM matches m
+INNER JOIN set_results sr
+    ON sr.match_id = m.id
+LEFT JOIN opening_odds o
+    ON o.match_id = m.id
+LEFT JOIN first_seen_odds f
+    ON f.match_id = m.id
+LEFT JOIN match_serve_set_stats ms1
+    ON ms1.match_id = m.id
+   AND ms1.set_number = 1
+   AND ms1.team = 1
+LEFT JOIN match_serve_set_stats ms2
+    ON ms2.match_id = m.id
+   AND ms2.set_number = 1
+   AND ms2.team = 2
+WHERE m.status = 'FINISHED'
+  AND m.winner IN (1, 2)
+  AND COALESCE(m.abandoned, 0) = 0
+  AND COALESCE(o.match_win1, f.match_win1) IS NOT NULL
+  AND COALESCE(o.match_win2, f.match_win2) IS NOT NULL
+  AND sr.set1_winner IN (1, 2)
+ORDER BY m.created_at ASC
+"""
+
 
 def build_rally_backtest_query(match_ids: list[int]) -> str:
     unique_ids = sorted({int(match_id) for match_id in match_ids})
@@ -574,6 +665,20 @@ def load_favorite_set_bounce_rows(query: str = FAVORITE_SET_BOUNCE_QUERY) -> pd.
 
     if rows.empty:
         raise ValueError("The favorite set bounce query returned no rows.")
+
+    return rows
+
+
+def load_favorite_set1_serve_rows(query: str = FAVORITE_SET1_SERVE_QUERY) -> pd.DataFrame:
+    if not settings.db_url:
+        raise ValueError("DB_URL is empty. Fill .env before loading favorite set1 serve rows.")
+
+    engine = create_engine(settings.db_url)
+    with engine.connect() as connection:
+        rows = pd.read_sql(text(query), connection)
+
+    if rows.empty:
+        raise ValueError("The favorite set1 serve query returned no rows.")
 
     return rows
 
