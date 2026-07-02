@@ -8,7 +8,7 @@ from src.live_set_db import load_set_comeback_rows
 
 
 OUTPUT_DIR = Path("data/processed")
-LEAD_THRESHOLD = 5
+LEAD_THRESHOLDS = (4, 5, 6)
 
 
 def prepare_set_records(rows: pd.DataFrame) -> pd.DataFrame:
@@ -64,12 +64,10 @@ def prepare_set_records(rows: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-def build_summary(records: pd.DataFrame, lead_threshold: int = LEAD_THRESHOLD) -> pd.DataFrame:
+def build_summary(records: pd.DataFrame, lead_thresholds: tuple[int, ...] = LEAD_THRESHOLDS) -> pd.DataFrame:
     all_next_sets = records[records["next_set_exists"] == 1].copy()
-    blown_lead = all_next_sets[
-        (all_next_sets["max_lead"] >= lead_threshold) & (all_next_sets["lost_set"] == 1)
-    ].copy()
     control = all_next_sets[all_next_sets["lost_set"] == 1].copy()
+    baseline_win_rate = float(1.0 - control["lost_next_set"].mean()) if not control.empty else 0.0
 
     summary_rows = [
         {
@@ -80,26 +78,35 @@ def build_summary(records: pd.DataFrame, lead_threshold: int = LEAD_THRESHOLD) -
             if not control.empty
             else 0.0,
             "avg_max_lead": float(control["max_lead"].mean()) if not control.empty else 0.0,
-        },
-        {
-            "group": f"blew_{lead_threshold}plus_lead_and_lost_set",
-            "samples": int(len(blown_lead)),
-            "lose_next_set_rate": float(blown_lead["lost_next_set"].mean())
-            if not blown_lead.empty
-            else 0.0,
-            "win_next_set_rate": float(1.0 - blown_lead["lost_next_set"].mean())
-            if not blown_lead.empty
-            else 0.0,
-            "avg_max_lead": float(blown_lead["max_lead"].mean()) if not blown_lead.empty else 0.0,
+            "uplift_vs_baseline_win_rate": 0.0,
         },
     ]
+
+    for lead_threshold in lead_thresholds:
+        blown_lead = all_next_sets[
+            (all_next_sets["max_lead"] >= lead_threshold) & (all_next_sets["lost_set"] == 1)
+        ].copy()
+        win_rate = float(1.0 - blown_lead["lost_next_set"].mean()) if not blown_lead.empty else 0.0
+        summary_rows.append(
+            {
+                "group": f"blew_{lead_threshold}plus_lead_and_lost_set",
+                "samples": int(len(blown_lead)),
+                "lose_next_set_rate": float(blown_lead["lost_next_set"].mean())
+                if not blown_lead.empty
+                else 0.0,
+                "win_next_set_rate": win_rate,
+                "avg_max_lead": float(blown_lead["max_lead"].mean()) if not blown_lead.empty else 0.0,
+                "uplift_vs_baseline_win_rate": win_rate - baseline_win_rate,
+            }
+        )
+
     return pd.DataFrame(summary_rows)
 
 
 def main() -> None:
     rows = load_set_comeback_rows()
     records = prepare_set_records(rows)
-    summary = build_summary(records, LEAD_THRESHOLD)
+    summary = build_summary(records, LEAD_THRESHOLDS)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     records_path = OUTPUT_DIR / "set_comeback_records.csv"
@@ -108,13 +115,14 @@ def main() -> None:
     summary.to_csv(summary_path, index=False)
 
     print("Set comeback analysis")
-    print(f"Lead threshold: {LEAD_THRESHOLD}+")
+    print(f"Lead thresholds: {', '.join(str(value) + '+' for value in LEAD_THRESHOLDS)}")
     for row in summary.itertuples(index=False):
         print(
             f"  {row.group}: samples={row.samples}, "
             f"lose_next_set_rate={row.lose_next_set_rate:.4f}, "
             f"win_next_set_rate={row.win_next_set_rate:.4f}, "
-            f"avg_max_lead={row.avg_max_lead:.2f}"
+            f"avg_max_lead={row.avg_max_lead:.2f}, "
+            f"uplift={row.uplift_vs_baseline_win_rate:.4f}"
         )
     print(f"Summary saved to {summary_path}")
     print(f"Records saved to {records_path}")
