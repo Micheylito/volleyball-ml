@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+from sklearn.linear_model import LogisticRegression
 
 from src.config import settings
 from src.db import load_matches, load_rally_backtest_snapshots
@@ -15,6 +16,16 @@ SIGNAL_THRESHOLD = 0.80
 BATCH_MATCH_COUNT = 250
 ODDS_BUCKETS = (1.20, 1.40, 1.70, 2.20)
 PRIMARY_SUMMARY_NAME = "first_signal_per_match"
+FOCUSED_ODDS_BUCKET = "1.40-1.69"
+META_KEEP_THRESHOLDS = (0.50, 0.55, 0.60, 0.65, 0.70)
+META_MIN_TRAIN_COVERAGE = 0.20
+LIVE_FEATURE_COLUMNS = [
+    "live_score_gap",
+    "live_total_points",
+    "live_set_number",
+    "live_match_prob_shift_from_reference",
+    "live_set_match_gap_delta",
+]
 
 
 def train_reference_model(train_matches: pd.DataFrame):
@@ -203,6 +214,204 @@ def summarize_signals_by_odds_bucket(signals: pd.DataFrame, summary_name: str) -
     ).reset_index(drop=True)
 
 
+def _normalized_home_probability(home_odds: pd.Series, away_odds: pd.Series) -> pd.Series:
+    implied_home = 1.0 / pd.to_numeric(home_odds, errors="coerce")
+    implied_away = 1.0 / pd.to_numeric(away_odds, errors="coerce")
+    overround = implied_home + implied_away
+    return implied_home / overround
+
+
+def add_live_feature_columns(signals: pd.DataFrame) -> pd.DataFrame:
+    if signals.empty:
+        return signals.copy()
+
+    enriched = signals.copy()
+    current_home_prob = _normalized_home_probability(enriched["home_odds"], enriched["away_odds"])
+    reference_home_prob = _normalized_home_probability(
+        enriched["reference_home_odds"],
+        enriched["reference_away_odds"],
+    )
+    current_set_home_prob = _normalized_home_probability(
+        enriched["set1_win1"],
+        enriched["set1_win2"],
+    )
+
+    enriched["odds_bucket"] = enriched["market_odds"].apply(_label_odds_bucket)
+    enriched["live_score_gap"] = (
+        pd.to_numeric(enriched["score1"], errors="coerce").fillna(0.0)
+        - pd.to_numeric(enriched["score2"], errors="coerce").fillna(0.0)
+    )
+    enriched["live_total_points"] = (
+        pd.to_numeric(enriched["score1"], errors="coerce").fillna(0.0)
+        + pd.to_numeric(enriched["score2"], errors="coerce").fillna(0.0)
+    )
+    enriched["live_set_number"] = pd.to_numeric(
+        enriched["set_number"], errors="coerce"
+    ).fillna(0.0)
+    enriched["live_match_prob_shift_from_reference"] = (
+        current_home_prob - reference_home_prob
+    ).fillna(0.0)
+    enriched["live_set_match_gap_delta"] = (
+        (current_set_home_prob - (1.0 - current_set_home_prob))
+        - (current_home_prob - (1.0 - current_home_prob))
+    ).fillna(0.0)
+    return enriched
+
+
+def build_first_signal_rows_in_batches(
+    model,
+    train_matches: pd.DataFrame,
+    match_ids: list[int],
+) -> tuple[pd.DataFrame, int]:
+    signal_rows, total_snapshots = build_signal_rows_in_batches(model, train_matches, match_ids)
+    if signal_rows.empty:
+        return signal_rows, total_snapshots
+
+    first_signal_rows = (
+        signal_rows.sort_values(["snapshot_ts", "match_id", "set_number", "rally_number"])
+        .drop_duplicates(subset=["match_id"], keep="first")
+        .reset_index(drop=True)
+    )
+    return first_signal_rows, total_snapshots
+
+
+def select_meta_threshold(train_zone: pd.DataFrame, probability_column: str) -> float:
+    if train_zone.empty:
+        return META_KEEP_THRESHOLDS[0]
+
+    best_threshold = META_KEEP_THRESHOLDS[0]
+    best_accuracy = -1.0
+    best_coverage = -1.0
+    total_rows = len(train_zone)
+
+    for threshold in META_KEEP_THRESHOLDS:
+        kept = train_zone[train_zone[probability_column] >= threshold]
+        if kept.empty:
+            continue
+        coverage = len(kept) / total_rows
+        if coverage < META_MIN_TRAIN_COVERAGE:
+            continue
+        accuracy = float(kept["is_correct"].mean())
+        if (accuracy, coverage) > (best_accuracy, best_coverage):
+            best_threshold = threshold
+            best_accuracy = accuracy
+            best_coverage = coverage
+
+    return best_threshold
+
+
+def summarize_meta_strategy(
+    rows: pd.DataFrame,
+    strategy_name: str,
+    probability_column: str,
+    keep_threshold: float,
+) -> dict[str, float | int | str]:
+    kept = rows[rows[probability_column] >= keep_threshold].copy()
+    if kept.empty:
+        return {
+            "strategy_name": strategy_name,
+            "keep_threshold": keep_threshold,
+            "matches": 0,
+            "coverage": 0.0,
+            "accuracy": 0.0,
+            "avg_market_odds": 0.0,
+        }
+
+    return {
+        "strategy_name": strategy_name,
+        "keep_threshold": keep_threshold,
+        "matches": len(kept),
+        "coverage": len(kept) / len(rows),
+        "accuracy": float(kept["is_correct"].mean()),
+        "avg_market_odds": float(kept["market_odds"].mean()),
+    }
+
+
+def run_meta_filter_analysis(
+    train_first_signals: pd.DataFrame,
+    test_first_signals: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    train_signals = add_live_feature_columns(train_first_signals)
+    test_signals = add_live_feature_columns(test_first_signals)
+
+    train_zone = train_signals[train_signals["odds_bucket"] == FOCUSED_ODDS_BUCKET].copy()
+    test_zone = test_signals[test_signals["odds_bucket"] == FOCUSED_ODDS_BUCKET].copy()
+
+    results: list[dict[str, float | int | str]] = []
+    if test_zone.empty:
+        return pd.DataFrame(), pd.DataFrame()
+    if train_zone.empty or train_zone["is_correct"].nunique() < 2:
+        return pd.DataFrame(), pd.DataFrame()
+
+    results.append(
+        {
+            "strategy_name": "bet_all",
+            "keep_threshold": 0.0,
+            "matches": len(test_zone),
+            "coverage": 1.0,
+            "accuracy": float(test_zone["is_correct"].mean()),
+            "avg_market_odds": float(test_zone["market_odds"].mean()),
+        }
+    )
+
+    probability_only_model = LogisticRegression(max_iter=1000)
+    probability_only_model.fit(
+        train_zone[["signal_probability"]].fillna(0.0),
+        train_zone["is_correct"],
+    )
+    train_signals["meta_probability_only"] = probability_only_model.predict_proba(
+        train_signals[["signal_probability"]].fillna(0.0)
+    )[:, 1]
+    test_signals["meta_probability_only"] = probability_only_model.predict_proba(
+        test_signals[["signal_probability"]].fillna(0.0)
+    )[:, 1]
+
+    enhanced_columns = ["signal_probability", *LIVE_FEATURE_COLUMNS]
+    enhanced_model = LogisticRegression(max_iter=1000)
+    enhanced_model.fit(
+        train_zone[enhanced_columns].fillna(0.0),
+        train_zone["is_correct"],
+    )
+    train_signals["meta_live_enhanced"] = enhanced_model.predict_proba(
+        train_signals[enhanced_columns].fillna(0.0)
+    )[:, 1]
+    test_signals["meta_live_enhanced"] = enhanced_model.predict_proba(
+        test_signals[enhanced_columns].fillna(0.0)
+    )[:, 1]
+
+    train_zone = train_signals[train_signals["odds_bucket"] == FOCUSED_ODDS_BUCKET].copy()
+    test_zone = test_signals[test_signals["odds_bucket"] == FOCUSED_ODDS_BUCKET].copy()
+
+    probability_only_threshold = select_meta_threshold(train_zone, "meta_probability_only")
+    enhanced_threshold = select_meta_threshold(train_zone, "meta_live_enhanced")
+
+    results.append(
+        summarize_meta_strategy(
+            test_zone,
+            "probability_only_filter",
+            "meta_probability_only",
+            probability_only_threshold,
+        )
+    )
+    results.append(
+        summarize_meta_strategy(
+            test_zone,
+            "live_enhanced_filter",
+            "meta_live_enhanced",
+            enhanced_threshold,
+        )
+    )
+
+    result_frame = pd.DataFrame(results)
+    feature_importance_frame = pd.DataFrame(
+        {
+            "feature": ["signal_probability", *LIVE_FEATURE_COLUMNS],
+            "coefficient": enhanced_model.coef_[0],
+        }
+    ).sort_values("coefficient", ascending=False, key=lambda values: values.abs())
+    return result_frame, feature_importance_frame
+
+
 def main() -> None:
     print(f"Rally backtest model family: {settings.model_family}")
     print(f"Rally backtest feature blocks: {', '.join(settings.feature_blocks)}")
@@ -230,6 +439,14 @@ def main() -> None:
         .drop_duplicates(subset=["match_id"], keep="first")
         .reset_index(drop=True)
     )
+    train_match_ids = train_matches["match_id"].astype(int).tolist()
+    train_first_signal_rows, train_total_snapshots = build_first_signal_rows_in_batches(
+        model,
+        train_matches,
+        train_match_ids,
+    )
+    print(f"Loaded train rally snapshots: {train_total_snapshots}")
+    print(f"Train first-signal rows: {len(train_first_signal_rows)}")
 
     summary_all = summarize_signals(signal_rows, "all_signal_rows")
     summary_first = summarize_signals(first_signal_rows, "first_signal_per_match")
@@ -238,17 +455,25 @@ def main() -> None:
         first_signal_rows,
         PRIMARY_SUMMARY_NAME,
     )
+    meta_summary, meta_feature_importance = run_meta_filter_analysis(
+        train_first_signal_rows,
+        first_signal_rows,
+    )
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     signal_rows_path = OUTPUT_DIR / "rally_backtest_signal_rows.csv"
     first_signal_rows_path = OUTPUT_DIR / "rally_backtest_first_signal_rows.csv"
     summary_path = OUTPUT_DIR / "rally_backtest_signal_summary.csv"
     bucket_summary_path = OUTPUT_DIR / "rally_backtest_first_signal_odds_buckets.csv"
+    meta_summary_path = OUTPUT_DIR / "rally_backtest_meta_zone_140_169_summary.csv"
+    meta_features_path = OUTPUT_DIR / "rally_backtest_meta_zone_140_169_features.csv"
 
     signal_rows.to_csv(signal_rows_path, index=False)
     first_signal_rows.to_csv(first_signal_rows_path, index=False)
     combined_summary.to_csv(summary_path, index=False)
     bucket_summary.to_csv(bucket_summary_path, index=False)
+    meta_summary.to_csv(meta_summary_path, index=False)
+    meta_feature_importance.to_csv(meta_features_path, index=False)
 
     print("Rally signal summary:")
     if combined_summary.empty:
@@ -278,10 +503,27 @@ def main() -> None:
                 f"range={row.min_market_odds:.2f}-{row.max_market_odds:.2f}"
             )
 
+    print(f"\nFocused zone check: {FOCUSED_ODDS_BUCKET}")
+    if meta_summary.empty:
+        print("  No rows available for focused meta analysis.")
+    else:
+        for row in meta_summary.itertuples(index=False):
+            print(
+                f"  {row.strategy_name}: matches={row.matches}, "
+                f"coverage={row.coverage:.4f}, accuracy={row.accuracy:.4f}, "
+                f"avg_odds={row.avg_market_odds:.2f}, keep_threshold={row.keep_threshold:.2f}"
+            )
+    if not meta_feature_importance.empty:
+        print("  Enhanced live feature coefficients:")
+        for row in meta_feature_importance.itertuples(index=False):
+            print(f"    {row.feature}: {row.coefficient:.4f}")
+
     print(f"Signal rows saved to {signal_rows_path}")
     print(f"First signal rows saved to {first_signal_rows_path}")
     print(f"Signal summary saved to {summary_path}")
     print(f"First-signal odds buckets saved to {bucket_summary_path}")
+    print(f"Focused meta summary saved to {meta_summary_path}")
+    print(f"Focused meta features saved to {meta_features_path}")
 
 
 if __name__ == "__main__":

@@ -310,6 +310,29 @@ def build_rally_backtest_query(match_ids: list[int]) -> str:
 
     ids_sql = ", ".join(str(match_id) for match_id in unique_ids)
     return f"""
+WITH opening_odds AS (
+    SELECT mo.*
+    FROM match_opening_odds mo
+    INNER JOIN (
+        SELECT match_id, MIN(ts) AS first_ts
+        FROM match_opening_odds
+        GROUP BY match_id
+    ) first_odds
+        ON mo.match_id = first_odds.match_id
+       AND mo.ts = first_odds.first_ts
+),
+first_seen_odds AS (
+    SELECT fo.*
+    FROM match_first_seen_odds fo
+    INNER JOIN (
+        SELECT match_id, MIN(ts) AS first_ts
+        FROM match_first_seen_odds
+        GROUP BY match_id
+    ) first_seen
+        ON fo.match_id = first_seen.match_id
+       AND fo.ts = first_seen.first_ts
+),
+    
 WITH rallies_enriched AS (
     SELECT
         r.id AS rally_db_id,
@@ -374,6 +397,10 @@ SELECT
     m.team1_class,
     m.team2_class,
     m.match_class,
+    COALESCE(o.match_win1, f.match_win1) AS reference_home_odds,
+    COALESCE(o.match_win2, f.match_win2) AS reference_away_odds,
+    COALESCE(o.set1_win1, f.set1_win1) AS reference_set_win1,
+    COALESCE(o.set1_win2, f.set1_win2) AS reference_set_win2,
     lo.match_win1 AS home_odds,
     lo.match_win2 AS away_odds,
     lo.match_total_line AS match_total_line,
@@ -423,6 +450,10 @@ INNER JOIN latest_rally_odds lo
     ON lo.rally_db_id = re.rally_db_id
 INNER JOIN matches m
     ON m.id = re.match_id
+LEFT JOIN opening_odds o
+    ON o.match_id = m.id
+LEFT JOIN first_seen_odds f
+    ON f.match_id = m.id
 WHERE m.id IN ({ids_sql})
   AND m.winner IN (1, 2)
   AND COALESCE(m.abandoned, 0) = 0
