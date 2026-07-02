@@ -713,13 +713,19 @@ def prepare_feature_frame(matches: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def build_features(matches: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
+def build_features(
+    matches: pd.DataFrame, active_blocks: tuple[str, ...] | None = None
+) -> tuple[pd.DataFrame, pd.Series]:
     df = prepare_feature_frame(matches)
-    x = df[get_feature_columns(settings.feature_blocks)].fillna(0.0)
+    selected_blocks = active_blocks or settings.feature_blocks
+    x = df[get_feature_columns(selected_blocks)].fillna(0.0)
     y = (df["winner"] == 1).astype(int)
     return x, y
 
 
-def build_inference_features(matches: pd.DataFrame) -> pd.DataFrame:
+def build_inference_features(
+    matches: pd.DataFrame, active_blocks: tuple[str, ...] | None = None
+) -> pd.DataFrame:
     df = prepare_feature_frame(matches)
-    return df[get_feature_columns(settings.feature_blocks)].fillna(0.0)
+    selected_blocks = active_blocks or settings.feature_blocks
+    return df[get_feature_columns(selected_blocks)].fillna(0.0)

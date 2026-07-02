@@ -25,6 +25,11 @@ def _parse_feature_blocks(raw_value: str) -> tuple[str, ...]:
     return tuple(blocks) if blocks else DEFAULT_FEATURE_BLOCKS
 
 
+def _parse_optional_feature_blocks(raw_value: str) -> tuple[str, ...] | None:
+    blocks = [block.strip() for block in raw_value.split(",") if block.strip()]
+    return tuple(blocks) if blocks else None
+
+
 @dataclass(frozen=True)
 class Settings:
     db_url: str = os.getenv("DB_URL", "")
@@ -35,6 +40,9 @@ class Settings:
     prediction_threshold: float = float(os.getenv("PREDICTION_THRESHOLD", "0.62"))
     feature_blocks: tuple[str, ...] = _parse_feature_blocks(
         os.getenv("FEATURE_BLOCKS", ",".join(DEFAULT_FEATURE_BLOCKS))
+    )
+    compare_feature_blocks: tuple[str, ...] | None = _parse_optional_feature_blocks(
+        os.getenv("COMPARE_FEATURE_BLOCKS", "")
     )
     send_telegram_signals: bool = os.getenv("SEND_TELEGRAM_SIGNALS", "false").lower() in (
         "1",
