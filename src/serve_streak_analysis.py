@@ -1,0 +1,120 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pandas as pd
+
+from src.live_set_db import load_serve_streak_rows
+
+
+OUTPUT_DIR = Path("data/processed")
+
+
+def prepare_serve_streak_frame(rows: pd.DataFrame) -> pd.DataFrame:
+    df = rows.copy()
+    df["rally_ts"] = pd.to_datetime(df["rally_ts"])
+    df = df.sort_values(
+        ["match_id", "set_number", "rally_number", "rally_db_id"]
+    ).reset_index(drop=True)
+
+    streak_before_rally: list[int] = []
+    current_group: tuple[int, int] | None = None
+    current_server = 0
+    current_streak = 0
+
+    for row in df.itertuples(index=False):
+        group_key = (int(row.match_id), int(row.set_number))
+        serve_team = int(row.serve_team)
+
+        if group_key != current_group:
+            current_group = group_key
+            current_server = 0
+            current_streak = 0
+
+        if serve_team == current_server:
+            current_streak += 1
+        else:
+            current_server = serve_team
+            current_streak = 1
+
+        streak_before_rally.append(current_streak)
+
+    df["serve_streak_before_rally"] = streak_before_rally
+    df["server_won_rally"] = (df["serve_team"] == df["point_winner"]).astype(int)
+    df["set_score_gap"] = (df["score1"] - df["score2"]).abs()
+    df["set_total_points"] = df["score1"] + df["score2"]
+    df["is_clutch_phase"] = ((df["score1"] >= 20) | (df["score2"] >= 20)).astype(int)
+
+    df["serve_streak_bucket"] = df["serve_streak_before_rally"].map(
+        lambda value: f"{value}" if value < 5 else "5+"
+    )
+    return df
+
+
+def build_bucket_summary(df: pd.DataFrame) -> pd.DataFrame:
+    summary = (
+        df.groupby("serve_streak_bucket", dropna=False)
+        .agg(
+            rallies=("rally_db_id", "count"),
+            server_win_rate=("server_won_rally", "mean"),
+            avg_total_points=("set_total_points", "mean"),
+            clutch_share=("is_clutch_phase", "mean"),
+        )
+        .reset_index()
+    )
+
+    bucket_order = {str(value): value for value in range(1, 5)}
+    bucket_order["5+"] = 5
+    summary["bucket_sort"] = summary["serve_streak_bucket"].map(bucket_order).fillna(999)
+    summary = summary.sort_values("bucket_sort").drop(columns=["bucket_sort"]).reset_index(drop=True)
+    return summary
+
+
+def build_split_summary(df: pd.DataFrame) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    splits = [
+        ("all", df),
+        ("clutch_only", df[df["is_clutch_phase"] == 1].copy()),
+        ("non_clutch", df[df["is_clutch_phase"] == 0].copy()),
+        ("close_score_gap_le_2", df[df["set_score_gap"] <= 2].copy()),
+    ]
+
+    for split_name, split_df in splits:
+        if split_df.empty:
+            continue
+        summary = build_bucket_summary(split_df)
+        summary.insert(0, "split", split_name)
+        frames.append(summary)
+
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def main() -> None:
+    rows = load_serve_streak_rows()
+    prepared = prepare_serve_streak_frame(rows)
+    summary = build_split_summary(prepared)
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    rows_path = OUTPUT_DIR / "serve_streak_analysis_rows.csv"
+    summary_path = OUTPUT_DIR / "serve_streak_analysis_summary.csv"
+
+    prepared.to_csv(rows_path, index=False)
+    summary.to_csv(summary_path, index=False)
+
+    print("Serve streak analysis")
+    print(f"Loaded rallies: {len(prepared)}")
+    print("\nServer win rate by serve streak before rally:")
+    for row in summary[summary["split"] == "all"].itertuples(index=False):
+        print(
+            f"  streak={row.serve_streak_bucket}: "
+            f"rallies={row.rallies}, "
+            f"server_win_rate={row.server_win_rate:.4f}, "
+            f"clutch_share={row.clutch_share:.4f}"
+        )
+
+    print(f"\nDetailed summary saved to {summary_path}")
+    print(f"Prepared rows saved to {rows_path}")
+
+
+if __name__ == "__main__":
+    main()

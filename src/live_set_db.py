@@ -134,3 +134,38 @@ def load_current_set_live_rows(
         raise ValueError("The current set live query returned no rows.")
 
     return rows
+
+
+SERVE_STREAK_QUERY = """
+SELECT
+    r.id AS rally_db_id,
+    r.match_id,
+    r.set_number,
+    r.rally_number,
+    r.score1,
+    r.score2,
+    r.serve_team,
+    r.point_winner,
+    r.created_at AS rally_ts
+FROM rallies r
+INNER JOIN matches m
+    ON m.id = r.match_id
+WHERE r.serve_team IN (1, 2)
+  AND r.point_winner IN (1, 2)
+  AND COALESCE(m.abandoned, 0) = 0
+ORDER BY r.match_id ASC, r.set_number ASC, r.rally_number ASC, r.id ASC
+"""
+
+
+def load_serve_streak_rows(query: str = SERVE_STREAK_QUERY) -> pd.DataFrame:
+    if not settings.db_url:
+        raise ValueError("DB_URL is empty. Fill .env before loading serve streak rows.")
+
+    engine = create_engine(settings.db_url)
+    with engine.connect() as connection:
+        rows = pd.read_sql(text(query), connection)
+
+    if rows.empty:
+        raise ValueError("The serve streak query returned no rows.")
+
+    return rows
