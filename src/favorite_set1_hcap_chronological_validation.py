@@ -11,7 +11,7 @@ from src.favorite_set1_set2_side_markets_analysis import (
 
 
 OUTPUT_DIR = Path("data/processed")
-TARGET_SOURCE = "first_seen"
+TARGET_SOURCES = ("opening", "first_seen")
 TARGET_MAX_FAVORITE_ODDS = 1.50
 TARGET_MIN_SERVE_GAP = 0.08
 TARGET_HCAP_LINE = -3.5
@@ -23,7 +23,7 @@ def select_pattern_rows() -> pd.DataFrame:
     hcap_rows["match_date"] = pd.to_datetime(hcap_rows["match_date"])
 
     selected = hcap_rows[
-        (hcap_rows["odds_source"] == TARGET_SOURCE)
+        (hcap_rows["odds_source"].isin(TARGET_SOURCES))
         & (hcap_rows["favorite_pre_match_odds"] <= TARGET_MAX_FAVORITE_ODDS)
         & (hcap_rows["favorite_set1_serve_gap"] >= TARGET_MIN_SERVE_GAP)
         & (hcap_rows["favorite_set2_hcap_line"].round(2) == TARGET_HCAP_LINE)
@@ -127,29 +127,53 @@ def build_rolling_summary(rows: pd.DataFrame, chunk_size: int = 50) -> pd.DataFr
     return pd.DataFrame(records)
 
 
+def build_source_summary(rows: pd.DataFrame) -> pd.DataFrame:
+    if rows.empty:
+        return pd.DataFrame([summarize_slice(rows, "all_sources")])
+
+    parts = [("all_sources", rows)]
+    for source in TARGET_SOURCES:
+        parts.append((source, rows[rows["odds_source"] == source].copy()))
+
+    return pd.DataFrame([summarize_slice(frame, label) for label, frame in parts])
+
+
 def main() -> None:
     rows = select_pattern_rows()
     summary = build_summary(rows)
     rolling = build_rolling_summary(rows, chunk_size=50)
+    source_summary = build_source_summary(rows)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     rows_path = OUTPUT_DIR / "favorite_set1_hcap_chronological_rows.csv"
     summary_path = OUTPUT_DIR / "favorite_set1_hcap_chronological_summary.csv"
     rolling_path = OUTPUT_DIR / "favorite_set1_hcap_chronological_rolling.csv"
+    source_summary_path = OUTPUT_DIR / "favorite_set1_hcap_chronological_source_summary.csv"
 
     rows.to_csv(rows_path, index=False)
     summary.to_csv(summary_path, index=False)
     rolling.to_csv(rolling_path, index=False)
+    source_summary.to_csv(source_summary_path, index=False)
 
     print("Favorite won set1 handicap chronological validation")
     print(
         "Pattern: "
-        f"{TARGET_SOURCE}, favorite_odds <= {TARGET_MAX_FAVORITE_ODDS:.2f}, "
+        f"{'/'.join(TARGET_SOURCES)}, favorite_odds <= {TARGET_MAX_FAVORITE_ODDS:.2f}, "
         f"serve_gap >= {TARGET_MIN_SERVE_GAP:.2f}, "
         f"hcap_line = {TARGET_HCAP_LINE:.1f}"
     )
     print(f"Rows: {len(rows)}")
     print(f"Matches: {rows['match_id'].nunique() if not rows.empty else 0}")
+
+    print("\nSource breakdown:")
+    for row in source_summary.itertuples(index=False):
+        print(
+            f"  {row.slice}: samples={row.samples}, "
+            f"cover_rate={row.cover_rate:.4f}, "
+            f"breakeven={row.breakeven:.4f}, "
+            f"edge={row.edge:.4f}, "
+            f"avg_odds={row.avg_hcap_odds:.2f}"
+        )
 
     for row in summary.itertuples(index=False):
         print(
@@ -174,6 +198,7 @@ def main() -> None:
 
     print(f"\nSummary saved to {summary_path}")
     print(f"Rolling summary saved to {rolling_path}")
+    print(f"Source summary saved to {source_summary_path}")
     print(f"Rows saved to {rows_path}")
 
 
