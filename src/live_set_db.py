@@ -139,6 +139,78 @@ def load_current_set_live_rows(
     return rows
 
 
+FIRST_SET2_MATCH_TOTAL_QUERY = """
+WITH latest_rally_odds AS (
+    SELECT *
+    FROM (
+        SELECT
+            ro.*,
+            ROW_NUMBER() OVER (
+                PARTITION BY ro.rally_db_id
+                ORDER BY ro.ts DESC, ro.id DESC
+            ) AS rn
+        FROM rally_odds ro
+        WHERE ro.rally_db_id IS NOT NULL
+          AND ro.odds_status = 'OK'
+          AND ro.match_total_line IS NOT NULL
+          AND ro.match_total_over IS NOT NULL
+          AND ro.match_total_under IS NOT NULL
+    ) ranked
+    WHERE rn = 1
+),
+set2_rows AS (
+    SELECT
+        r.match_id,
+        COALESCE(lo.ts, r.created_at) AS snapshot_ts,
+        r.rally_number,
+        r.score1,
+        r.score2,
+        lo.match_total_line,
+        lo.match_total_over,
+        lo.match_total_under,
+        ROW_NUMBER() OVER (
+            PARTITION BY r.match_id
+            ORDER BY COALESCE(lo.ts, r.created_at) ASC, r.id ASC
+        ) AS rn
+    FROM rallies r
+    INNER JOIN latest_rally_odds lo
+        ON lo.rally_db_id = r.id
+    INNER JOIN matches m
+        ON m.id = r.match_id
+    WHERE r.set_number = 2
+      AND COALESCE(m.abandoned, 0) = 0
+)
+SELECT
+    match_id,
+    snapshot_ts,
+    rally_number,
+    score1,
+    score2,
+    match_total_line,
+    match_total_over,
+    match_total_under
+FROM set2_rows
+WHERE rn = 1
+ORDER BY snapshot_ts ASC, match_id ASC
+"""
+
+
+def load_first_set2_match_total_rows(
+    query: str = FIRST_SET2_MATCH_TOTAL_QUERY,
+) -> pd.DataFrame:
+    if not settings.db_url:
+        raise ValueError("DB_URL is empty. Fill .env before loading first set2 match-total rows.")
+
+    engine = create_engine(settings.db_url)
+    with engine.connect() as connection:
+        rows = pd.read_sql(text(query), connection)
+
+    if rows.empty:
+        raise ValueError("The first set2 match-total query returned no rows.")
+
+    return rows
+
+
 SERVE_STREAK_QUERY = """
 SELECT
     r.id AS rally_db_id,

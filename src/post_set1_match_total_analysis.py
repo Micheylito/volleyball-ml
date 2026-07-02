@@ -6,7 +6,7 @@ import pandas as pd
 
 from src.db import load_favorite_set1_serve_rows
 from src.favorite_set1_serve_analysis import prepare_rows
-from src.live_set_db import load_current_set_live_rows
+from src.live_set_db import load_first_set2_match_total_rows
 
 
 OUTPUT_DIR = Path("data/processed")
@@ -20,43 +20,18 @@ ODDS_RANGES = (
 
 
 def load_first_set2_total_market_rows() -> pd.DataFrame:
-    rows = load_current_set_live_rows(min_total_points=0, rally_step=1).copy()
+    rows = load_first_set2_match_total_rows().copy()
     rows["snapshot_ts"] = pd.to_datetime(rows["snapshot_ts"])
-    numeric_columns = [
-        "set_number",
+    for column in [
         "rally_number",
         "score1",
         "score2",
         "match_total_line",
         "match_total_over",
         "match_total_under",
-    ]
-    for column in numeric_columns:
+    ]:
         rows[column] = pd.to_numeric(rows[column], errors="coerce")
-
-    rows = rows[
-        (rows["set_number"] == 2)
-        & rows["match_total_line"].notna()
-        & rows["match_total_over"].notna()
-        & rows["match_total_under"].notna()
-    ].copy()
-
-    rows = rows.sort_values(
-        ["match_id", "snapshot_ts", "rally_number", "score1", "score2"]
-    ).drop_duplicates(subset=["match_id"], keep="first")
-
-    return rows[
-        [
-            "match_id",
-            "snapshot_ts",
-            "rally_number",
-            "score1",
-            "score2",
-            "match_total_line",
-            "match_total_over",
-            "match_total_under",
-        ]
-    ].copy()
+    return rows
 
 
 def build_analysis_rows() -> pd.DataFrame:
