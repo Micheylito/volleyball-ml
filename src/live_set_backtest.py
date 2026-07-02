@@ -10,6 +10,8 @@ from src.live_set_db import load_current_set_live_rows
 from src.live_set_features import (
     BASELINE_SET_FEATURE_COLUMNS,
     EXTENDED_SET_FEATURE_COLUMNS,
+    EXTENDED_CLUTCH_STREAK_FEATURE_COLUMNS,
+    STREAK_SET_FEATURE_COLUMNS,
     build_current_set_live_features,
 )
 from src.train import build_model
@@ -114,15 +116,30 @@ def main() -> None:
         "extended_clutch",
         EXTENDED_SET_FEATURE_COLUMNS,
     )
+    streak_result, streak_frame = run_experiment(
+        rows,
+        "streak_only",
+        STREAK_SET_FEATURE_COLUMNS,
+    )
+    clutch_streak_result, clutch_streak_frame = run_experiment(
+        rows,
+        "extended_clutch_streak",
+        EXTENDED_CLUTCH_STREAK_FEATURE_COLUMNS,
+    )
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = OUTPUT_DIR / "live_set_backtest_predictions.csv"
     summary_path = OUTPUT_DIR / "live_set_backtest_summary.csv"
-    prediction_frame = pd.concat([baseline_frame, extended_frame], ignore_index=True)
+    prediction_frame = pd.concat(
+        [baseline_frame, extended_frame, streak_frame, clutch_streak_frame],
+        ignore_index=True,
+    )
     prediction_frame.to_csv(output_path, index=False)
-    pd.DataFrame([baseline_result, extended_result]).to_csv(summary_path, index=False)
+    pd.DataFrame(
+        [baseline_result, extended_result, streak_result, clutch_streak_result]
+    ).to_csv(summary_path, index=False)
     print("\nComparison summary:")
-    for result in [baseline_result, extended_result]:
+    for result in [baseline_result, extended_result, streak_result, clutch_streak_result]:
         print(
             f"  {result['experiment']}: rows={result['rows']}, "
             f"accuracy={result['accuracy']:.4f}, f1_macro={result['f1_macro']:.4f}"

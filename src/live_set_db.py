@@ -85,6 +85,7 @@ SELECT
     r.rally_number,
     r.score1,
     r.score2,
+    r.point_winner,
     r.serve_team,
     lo.set_win1,
     lo.set_win2,
