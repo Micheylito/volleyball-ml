@@ -3,36 +3,33 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, f1_score
 
+from src.config import settings
 from src.db import load_matches
 from src.features import build_features
-from src.train import time_based_split
+from src.train import build_model, time_based_split
 
 
 OUTPUT_DIR = Path("data/processed")
 LEAGUE_SELECTION_MODE = "odds_only"
 MIN_LEAGUE_MATCHES = 30
 MIN_LEAGUE_ACCURACY = 0.75
+SIGNAL_THRESHOLDS = (0.55, 0.60, 0.65, 0.70, 0.75, 0.80)
 
 
 def build_test_predictions(matches: pd.DataFrame, label: str) -> tuple[pd.DataFrame, dict[str, float | int]]:
     train_matches, test_matches = time_based_split(matches)
     combined_matches = pd.concat([train_matches, test_matches], ignore_index=True)
 
-    x_all, y_all = build_features(combined_matches)
+    x_all, y_all = build_features(combined_matches, active_blocks=settings.feature_blocks)
     train_rows = len(train_matches)
     x_train = x_all.iloc[:train_rows]
     y_train = y_all.iloc[:train_rows]
     x_test = x_all.iloc[train_rows:]
     y_test = y_all.iloc[train_rows:]
 
-    model = RandomForestClassifier(
-        n_estimators=200,
-        max_depth=6,
-        random_state=42,
-    )
+    model = build_model(settings.model_family)
     model.fit(x_train, y_train)
 
     probabilities = model.predict_proba(x_test)[:, 1]
@@ -86,7 +83,70 @@ def build_allowed_leagues(league_summary: pd.DataFrame) -> pd.DataFrame:
     return allowed
 
 
+def build_signal_threshold_summary(predictions: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, float | int | str]] = []
+    for mode in sorted(predictions["mode"].dropna().unique()):
+        mode_predictions = predictions[predictions["mode"] == mode].copy()
+        for threshold in SIGNAL_THRESHOLDS:
+            home_signals = mode_predictions[mode_predictions["pred_home_win_proba"] >= threshold].copy()
+            away_signals = mode_predictions[mode_predictions["pred_home_win_proba"] <= (1.0 - threshold)].copy()
+
+            if not home_signals.empty:
+                rows.append(
+                    {
+                        "mode": mode,
+                        "threshold": threshold,
+                        "signal_side": "home",
+                        "signals": len(home_signals),
+                        "coverage": len(home_signals) / len(mode_predictions),
+                        "accuracy": float((home_signals["target_home_win"] == 1).mean()),
+                        "avg_probability": float(home_signals["pred_home_win_proba"].mean()),
+                    }
+                )
+            else:
+                rows.append(
+                    {
+                        "mode": mode,
+                        "threshold": threshold,
+                        "signal_side": "home",
+                        "signals": 0,
+                        "coverage": 0.0,
+                        "accuracy": 0.0,
+                        "avg_probability": 0.0,
+                    }
+                )
+
+            if not away_signals.empty:
+                rows.append(
+                    {
+                        "mode": mode,
+                        "threshold": threshold,
+                        "signal_side": "away",
+                        "signals": len(away_signals),
+                        "coverage": len(away_signals) / len(mode_predictions),
+                        "accuracy": float((away_signals["target_home_win"] == 0).mean()),
+                        "avg_probability": float((1.0 - away_signals["pred_home_win_proba"]).mean()),
+                    }
+                )
+            else:
+                rows.append(
+                    {
+                        "mode": mode,
+                        "threshold": threshold,
+                        "signal_side": "away",
+                        "signals": 0,
+                        "coverage": 0.0,
+                        "accuracy": 0.0,
+                        "avg_probability": 0.0,
+                    }
+                )
+
+    return pd.DataFrame(rows)
+
+
 def main() -> None:
+    print(f"Backtest model family: {settings.model_family}")
+    print(f"Backtest feature blocks: {', '.join(settings.feature_blocks)}")
     matches = load_matches()
 
     full_predictions, full_summary = build_test_predictions(matches, "full_coverage")
@@ -106,12 +166,15 @@ def main() -> None:
     predictions_path = OUTPUT_DIR / "backtest_predictions.csv"
     league_summary_path = OUTPUT_DIR / "backtest_league_summary.csv"
     mode_summary_path = OUTPUT_DIR / "backtest_mode_summary.csv"
+    signal_summary_path = OUTPUT_DIR / "backtest_signal_threshold_summary.csv"
     allowed_leagues_path = OUTPUT_DIR / "allowed_leagues.csv"
     allowed_leagues = build_allowed_leagues(league_summary)
+    signal_summary = build_signal_threshold_summary(all_predictions)
 
     all_predictions.to_csv(predictions_path, index=False)
     league_summary.to_csv(league_summary_path, index=False)
     mode_summary.to_csv(mode_summary_path, index=False)
+    signal_summary.to_csv(signal_summary_path, index=False)
     allowed_leagues.to_csv(allowed_leagues_path, index=False)
 
     print("Backtest mode summary:")
@@ -124,6 +187,15 @@ def main() -> None:
     print(f"Predictions saved to {predictions_path}")
     print(f"League summary saved to {league_summary_path}")
     print(f"Mode summary saved to {mode_summary_path}")
+    print(f"Signal threshold summary saved to {signal_summary_path}")
+    print("Signal threshold highlights:")
+    for row in signal_summary[signal_summary["signals"] > 0].sort_values(
+        ["accuracy", "signals"], ascending=[False, False]
+    ).head(12).itertuples(index=False):
+        print(
+            f"  {row.mode} {row.signal_side} >= {row.threshold:.2f}: "
+            f"signals={row.signals}, accuracy={row.accuracy:.4f}, coverage={row.coverage:.4f}"
+        )
     print(
         f"Allowed leagues ({LEAGUE_SELECTION_MODE}, min_matches={MIN_LEAGUE_MATCHES}, "
         f"min_accuracy={MIN_LEAGUE_ACCURACY:.2f}): {len(allowed_leagues)}"
