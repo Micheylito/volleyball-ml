@@ -7,7 +7,11 @@ from sklearn.metrics import accuracy_score, classification_report, f1_score
 
 from src.config import settings
 from src.live_set_db import load_current_set_live_rows
-from src.live_set_features import BASELINE_SET_FEATURE_COLUMNS, build_current_set_live_features
+from src.live_set_features import (
+    BASELINE_SET_FEATURE_COLUMNS,
+    EXTENDED_SET_FEATURE_COLUMNS,
+    build_current_set_live_features,
+)
 from src.train import build_model
 
 
@@ -38,19 +42,15 @@ def build_summary_frame(test_rows: pd.DataFrame, probabilities, predictions) -> 
     return output
 
 
-def main() -> None:
-    print(f"Current set live backtest model family: {settings.model_family}")
-    print(f"Baseline set feature columns: {', '.join(BASELINE_SET_FEATURE_COLUMNS)}")
-    print(f"Sampling filters: min_total_points={MIN_TOTAL_POINTS}, rally_step={RALLY_STEP}")
-
-    rows = load_current_set_live_rows(
-        min_total_points=MIN_TOTAL_POINTS,
-        rally_step=RALLY_STEP,
-    )
+def run_experiment(
+    rows: pd.DataFrame,
+    label: str,
+    feature_columns: list[str],
+) -> tuple[dict[str, float | str], pd.DataFrame]:
     train_rows, test_rows = time_based_split(rows)
     combined_rows = pd.concat([train_rows, test_rows], ignore_index=True)
 
-    x_all, y_all = build_current_set_live_features(combined_rows)
+    x_all, y_all = build_current_set_live_features(combined_rows, feature_columns)
     train_count = len(train_rows)
     x_train = x_all.iloc[:train_count]
     y_train = y_all.iloc[:train_count]
@@ -63,6 +63,8 @@ def main() -> None:
     probabilities = model.predict_proba(x_test)[:, 1]
     predictions = (probabilities >= 0.5).astype(int)
 
+    print(f"\n=== {label} ===")
+    print(f"Feature columns: {', '.join(feature_columns)}")
     print(f"Loaded live-set rows: {len(rows)}")
     print(f"Training rows: {len(train_rows)}")
     print(f"Test rows: {len(test_rows)}")
@@ -80,10 +82,53 @@ def main() -> None:
     print(f"F1 macro: {f1_macro:.4f}")
 
     summary_frame = build_summary_frame(test_rows, probabilities, predictions)
+    summary_frame["experiment"] = label
+    return (
+        {
+            "experiment": label,
+            "accuracy": accuracy,
+            "f1_macro": f1_macro,
+            "rows": len(rows),
+            "train_rows": len(train_rows),
+            "test_rows": len(test_rows),
+        },
+        summary_frame,
+    )
+
+
+def main() -> None:
+    print(f"Current set live backtest model family: {settings.model_family}")
+    print(f"Sampling filters: min_total_points={MIN_TOTAL_POINTS}, rally_step={RALLY_STEP}")
+
+    rows = load_current_set_live_rows(
+        min_total_points=MIN_TOTAL_POINTS,
+        rally_step=RALLY_STEP,
+    )
+    baseline_result, baseline_frame = run_experiment(
+        rows,
+        "baseline",
+        BASELINE_SET_FEATURE_COLUMNS,
+    )
+    extended_result, extended_frame = run_experiment(
+        rows,
+        "extended_clutch",
+        EXTENDED_SET_FEATURE_COLUMNS,
+    )
+
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = OUTPUT_DIR / "live_set_backtest_predictions.csv"
-    summary_frame.to_csv(output_path, index=False)
+    summary_path = OUTPUT_DIR / "live_set_backtest_summary.csv"
+    prediction_frame = pd.concat([baseline_frame, extended_frame], ignore_index=True)
+    prediction_frame.to_csv(output_path, index=False)
+    pd.DataFrame([baseline_result, extended_result]).to_csv(summary_path, index=False)
+    print("\nComparison summary:")
+    for result in [baseline_result, extended_result]:
+        print(
+            f"  {result['experiment']}: rows={result['rows']}, "
+            f"accuracy={result['accuracy']:.4f}, f1_macro={result['f1_macro']:.4f}"
+        )
     print(f"Predictions saved to {output_path}")
+    print(f"Summary saved to {summary_path}")
 
 
 if __name__ == "__main__":
