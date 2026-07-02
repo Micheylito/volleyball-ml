@@ -45,8 +45,31 @@ LIVE_SERVE_COLUMNS = [
     "live_away_serve_volume",
     "live_serve_volume_gap",
 ]
+MARKET_DERIVED_COLUMNS = [
+    "market_overround",
+    "market_home_prob_norm",
+    "market_away_prob_norm",
+    "market_prob_gap_norm",
+    "market_favorite_odds",
+    "market_underdog_odds",
+    "market_favorite_prob_norm",
+    "market_underdog_prob_norm",
+    "market_is_home_favorite",
+    "market_is_away_favorite",
+    "market_favorite_edge",
+    "set1_overround",
+    "set1_home_prob_norm",
+    "set1_away_prob_norm",
+    "set1_prob_gap_norm",
+    "set1_home_favorite",
+    "set1_away_favorite",
+    "set1_vs_match_home_prob_delta",
+    "set1_vs_match_away_prob_delta",
+    "set1_vs_match_gap_delta",
+]
 FEATURE_BLOCKS = (
     "core_market",
+    "market_derived",
     "rest",
     "form_base",
     "serve_form",
@@ -464,6 +487,8 @@ def get_feature_columns(active_blocks: tuple[str, ...] | None = None) -> list[st
         feature_columns.extend(REST_COLUMNS)
     if "live_serve" in selected_blocks:
         feature_columns.extend(LIVE_SERVE_COLUMNS)
+    if "market_derived" in selected_blocks:
+        feature_columns.extend(MARKET_DERIVED_COLUMNS)
 
     for window in FORM_WINDOWS:
         if "form_base" in selected_blocks:
@@ -556,17 +581,69 @@ def prepare_feature_frame(matches: pd.DataFrame) -> pd.DataFrame:
     live_away_serve_volume = pd.to_numeric(
         df.get("live_away_serve_volume", 0.0), errors="coerce"
     )
+    home_odds = pd.to_numeric(df["home_odds"], errors="coerce")
+    away_odds = pd.to_numeric(df["away_odds"], errors="coerce")
+    set1_home_odds = pd.to_numeric(df["set1_win1"], errors="coerce")
+    set1_away_odds = pd.to_numeric(df["set1_win2"], errors="coerce")
+
+    implied_home_prob = 1.0 / home_odds
+    implied_away_prob = 1.0 / away_odds
+    market_overround = implied_home_prob + implied_away_prob
+    market_home_prob_norm = implied_home_prob / market_overround
+    market_away_prob_norm = implied_away_prob / market_overround
+    market_prob_gap_norm = market_home_prob_norm - market_away_prob_norm
+
+    market_favorite_odds = pd.concat([home_odds, away_odds], axis=1).min(axis=1)
+    market_underdog_odds = pd.concat([home_odds, away_odds], axis=1).max(axis=1)
+    market_favorite_prob_norm = pd.concat(
+        [market_home_prob_norm, market_away_prob_norm], axis=1
+    ).max(axis=1)
+    market_underdog_prob_norm = pd.concat(
+        [market_home_prob_norm, market_away_prob_norm], axis=1
+    ).min(axis=1)
+    market_is_home_favorite = (home_odds < away_odds).astype(int)
+    market_is_away_favorite = (away_odds < home_odds).astype(int)
+    market_favorite_edge = market_favorite_prob_norm - market_underdog_prob_norm
+
+    set1_implied_home_prob = 1.0 / set1_home_odds
+    set1_implied_away_prob = 1.0 / set1_away_odds
+    set1_overround = set1_implied_home_prob + set1_implied_away_prob
+    set1_home_prob_norm = set1_implied_home_prob / set1_overround
+    set1_away_prob_norm = set1_implied_away_prob / set1_overround
+    set1_prob_gap_norm = set1_home_prob_norm - set1_away_prob_norm
+    set1_home_favorite = (set1_home_odds < set1_away_odds).astype(int)
+    set1_away_favorite = (set1_away_odds < set1_home_odds).astype(int)
 
     derived_block = pd.DataFrame(
         {
-            "odds_gap": df["away_odds"] - df["home_odds"],
-            "implied_home_prob": 1.0 / df["home_odds"],
-            "implied_away_prob": 1.0 / df["away_odds"],
+            "odds_gap": away_odds - home_odds,
+            "implied_home_prob": implied_home_prob,
+            "implied_away_prob": implied_away_prob,
             "class_gap": df["team1_class"] - df["team2_class"],
             "is_women": (df["gender"] == "W").astype(int),
             "is_best_of_five": (df["best_of"] == 5).astype(int),
             "odds_source_opening": (df["odds_source"] == "opening").astype(int),
             "odds_source_first_seen": (df["odds_source"] == "first_seen").astype(int),
+            "market_overround": market_overround,
+            "market_home_prob_norm": market_home_prob_norm,
+            "market_away_prob_norm": market_away_prob_norm,
+            "market_prob_gap_norm": market_prob_gap_norm,
+            "market_favorite_odds": market_favorite_odds,
+            "market_underdog_odds": market_underdog_odds,
+            "market_favorite_prob_norm": market_favorite_prob_norm,
+            "market_underdog_prob_norm": market_underdog_prob_norm,
+            "market_is_home_favorite": market_is_home_favorite,
+            "market_is_away_favorite": market_is_away_favorite,
+            "market_favorite_edge": market_favorite_edge,
+            "set1_overround": set1_overround,
+            "set1_home_prob_norm": set1_home_prob_norm,
+            "set1_away_prob_norm": set1_away_prob_norm,
+            "set1_prob_gap_norm": set1_prob_gap_norm,
+            "set1_home_favorite": set1_home_favorite,
+            "set1_away_favorite": set1_away_favorite,
+            "set1_vs_match_home_prob_delta": set1_home_prob_norm - market_home_prob_norm,
+            "set1_vs_match_away_prob_delta": set1_away_prob_norm - market_away_prob_norm,
+            "set1_vs_match_gap_delta": set1_prob_gap_norm - market_prob_gap_norm,
             "live_home_serve_pct": live_home_serve_pct,
             "live_away_serve_pct": live_away_serve_pct,
             "live_serve_pct_gap": live_home_serve_pct - live_away_serve_pct,
