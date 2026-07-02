@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 
+import numpy as np
+
 import pandas as pd
 
 from src.config import settings
@@ -67,9 +69,21 @@ MARKET_DERIVED_COLUMNS = [
     "set1_vs_match_away_prob_delta",
     "set1_vs_match_gap_delta",
 ]
+MARKET_INTERACTION_COLUMNS = [
+    "market_gap_ratio_set1_to_match",
+    "market_abs_gap_ratio_set1_to_match",
+    "market_favorite_flip_between_match_and_set1",
+    "market_home_favorite_strength_x_set1_delta",
+    "market_away_favorite_strength_x_set1_delta",
+    "market_total_line_per_set",
+    "market_total_line_vs_match_gap",
+    "market_total_line_vs_favorite_edge",
+    "market_set1_total_line_delta_vs_match_total",
+]
 FEATURE_BLOCKS = (
     "core_market",
     "market_derived",
+    "market_interactions",
     "rest",
     "form_base",
     "serve_form",
@@ -489,6 +503,8 @@ def get_feature_columns(active_blocks: tuple[str, ...] | None = None) -> list[st
         feature_columns.extend(LIVE_SERVE_COLUMNS)
     if "market_derived" in selected_blocks:
         feature_columns.extend(MARKET_DERIVED_COLUMNS)
+    if "market_interactions" in selected_blocks:
+        feature_columns.extend(MARKET_INTERACTION_COLUMNS)
 
     for window in FORM_WINDOWS:
         if "form_base" in selected_blocks:
@@ -613,6 +629,25 @@ def prepare_feature_frame(matches: pd.DataFrame) -> pd.DataFrame:
     set1_prob_gap_norm = set1_home_prob_norm - set1_away_prob_norm
     set1_home_favorite = (set1_home_odds < set1_away_odds).astype(int)
     set1_away_favorite = (set1_away_odds < set1_home_odds).astype(int)
+    match_total_line = pd.to_numeric(df["match_total_line"], errors="coerce")
+    set1_total_line = pd.to_numeric(df["set1_total_line"], errors="coerce")
+    best_of = pd.to_numeric(df["best_of"], errors="coerce")
+
+    market_gap_ratio_set1_to_match = set1_prob_gap_norm / market_prob_gap_norm
+    market_abs_gap_ratio_set1_to_match = set1_prob_gap_norm.abs() / market_prob_gap_norm.abs()
+    market_favorite_flip_between_match_and_set1 = (
+        market_is_home_favorite != set1_home_favorite
+    ).astype(int)
+    market_home_favorite_strength_x_set1_delta = (
+        market_is_home_favorite * (set1_home_prob_norm - market_home_prob_norm)
+    )
+    market_away_favorite_strength_x_set1_delta = (
+        market_is_away_favorite * (set1_away_prob_norm - market_away_prob_norm)
+    )
+    market_total_line_per_set = match_total_line / best_of
+    market_total_line_vs_match_gap = market_total_line / market_prob_gap_norm.abs()
+    market_total_line_vs_favorite_edge = match_total_line / market_favorite_edge
+    market_set1_total_line_delta_vs_match_total = set1_total_line - market_total_line_per_set
 
     derived_block = pd.DataFrame(
         {
@@ -644,6 +679,23 @@ def prepare_feature_frame(matches: pd.DataFrame) -> pd.DataFrame:
             "set1_vs_match_home_prob_delta": set1_home_prob_norm - market_home_prob_norm,
             "set1_vs_match_away_prob_delta": set1_away_prob_norm - market_away_prob_norm,
             "set1_vs_match_gap_delta": set1_prob_gap_norm - market_prob_gap_norm,
+            "market_gap_ratio_set1_to_match": market_gap_ratio_set1_to_match,
+            "market_abs_gap_ratio_set1_to_match": market_abs_gap_ratio_set1_to_match,
+            "market_favorite_flip_between_match_and_set1": (
+                market_favorite_flip_between_match_and_set1
+            ),
+            "market_home_favorite_strength_x_set1_delta": (
+                market_home_favorite_strength_x_set1_delta
+            ),
+            "market_away_favorite_strength_x_set1_delta": (
+                market_away_favorite_strength_x_set1_delta
+            ),
+            "market_total_line_per_set": market_total_line_per_set,
+            "market_total_line_vs_match_gap": market_total_line_vs_match_gap,
+            "market_total_line_vs_favorite_edge": market_total_line_vs_favorite_edge,
+            "market_set1_total_line_delta_vs_match_total": (
+                market_set1_total_line_delta_vs_match_total
+            ),
             "live_home_serve_pct": live_home_serve_pct,
             "live_away_serve_pct": live_away_serve_pct,
             "live_serve_pct_gap": live_home_serve_pct - live_away_serve_pct,
@@ -654,6 +706,7 @@ def prepare_feature_frame(matches: pd.DataFrame) -> pd.DataFrame:
         index=df.index,
     )
     df = pd.concat([df, derived_block], axis=1)
+    df = df.replace([np.inf, -np.inf], np.nan)
 
     numeric_columns = get_feature_columns()
     df[numeric_columns] = df[numeric_columns].apply(pd.to_numeric, errors="coerce")
